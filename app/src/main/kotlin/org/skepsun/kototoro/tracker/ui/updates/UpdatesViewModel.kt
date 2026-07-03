@@ -296,8 +296,10 @@ class UpdatesViewModel @Inject constructor(
 	}
 
 	private suspend fun resolvePreferredLocalIdsByEntity(entityIds: Collection<Long>): Map<Long, Long?> {
+		if (entityIds.isEmpty()) return emptyMap()
+		val identities = workResolver.resolveManyByEntityIds(entityIds)
 		return entityIds.associateWith { entityId ->
-			workResolver.resolveByEntityId(entityId)?.preferredMangaId
+			identities[entityId]?.preferredMangaId
 		}
 	}
 

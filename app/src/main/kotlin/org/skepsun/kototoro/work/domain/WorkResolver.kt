@@ -8,6 +8,8 @@ interface WorkResolver {
 
 	suspend fun resolveByEntityId(entityId: Long): WorkIdentity?
 
+	suspend fun resolveManyByEntityIds(entityIds: Collection<Long>): Map<Long, WorkIdentity>
+
 	suspend fun resolveManyByMangaIds(mangaIds: Collection<Long>): Map<Long, WorkIdentity>
 
 	suspend fun ensureForProjection(
