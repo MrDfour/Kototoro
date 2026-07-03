@@ -42,6 +42,36 @@ class DefaultWorkResolver @Inject constructor(
 		)
 	}
 
+	override suspend fun resolveManyByEntityIds(entityIds: Collection<Long>): Map<Long, WorkIdentity> = withContext(Dispatchers.IO) {
+		val distinctEntityIds = entityIds.distinct()
+		if (distinctEntityIds.isEmpty()) {
+			return@withContext emptyMap()
+		}
+		val dao = db.getEntityGraphDao()
+		val entities = distinctEntityIds.chunked(MAX_WORK_RESOLVER_QUERY_PARAMS)
+			.flatMap { dao.findEntitiesByIds(it) }
+			.associateBy { it.id }
+		val bindingsByEntityId = distinctEntityIds.chunked(MAX_WORK_RESOLVER_QUERY_PARAMS)
+			.flatMap { dao.findActiveLocalBindingsByEntities(it) }
+			.groupBy { it.entityId }
+		val prefsByEntityId = distinctEntityIds.chunked(MAX_WORK_RESOLVER_QUERY_PARAMS)
+			.flatMap { dao.findEntityPrefsByIds(it) }
+			.associateBy { it.entityId }
+
+		distinctEntityIds.mapNotNull { entityId ->
+			val entity = entities[entityId] ?: return@mapNotNull null
+			if (entity.type != EntityType.WORK.name) {
+				return@mapNotNull null
+			}
+			entityId to buildIdentity(
+				entityId = entityId,
+				requestedMangaId = null,
+				bindings = bindingsByEntityId[entityId].orEmpty(),
+				prefs = prefsByEntityId[entityId],
+			)
+		}.toMap()
+	}
+
 	override suspend fun resolveManyByMangaIds(mangaIds: Collection<Long>): Map<Long, WorkIdentity> = withContext(Dispatchers.IO) {
 		val distinctMangaIds = mangaIds.distinct()
 		if (distinctMangaIds.isEmpty()) {

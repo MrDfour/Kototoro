@@ -608,8 +608,9 @@ class HistoryListViewModel @Inject constructor(
 			return emptyList()
 		}
 		val resolvedEntityIds = mapNotNull(ContentWithHistory::entityId).distinct()
+		val identities = workResolver.resolveManyByEntityIds(resolvedEntityIds)
 		val preferredLocalIdsByEntity = resolvedEntityIds.associateWith { entityId ->
-			workResolver.resolveByEntityId(entityId)?.preferredMangaId
+			identities[entityId]?.preferredMangaId
 		}
 		val result = ArrayList<HistoryGroup>(size)
 		var current: MutableList<ContentWithHistory>? = null
