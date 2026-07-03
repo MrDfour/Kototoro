@@ -359,7 +359,9 @@ class WorkAggregateRepository @Inject constructor(
 		entityIds: Collection<Long>,
 		anchorIds: Collection<Long>,
 	): WorkProjectionSet {
-		val identitiesByEntityId = workResolver.resolveManyByEntityIds(entityIds.distinct())
+		val identitiesByEntityId = entityIds
+			.distinct()
+			.associateWith { entityId -> workResolver.resolveByEntityId(entityId) }
 		val projectionIds = LinkedHashSet<Long>()
 		projectionIds += anchorIds
 		identitiesByEntityId.values.filterNotNull().forEach { identity ->

@@ -462,10 +462,8 @@ class FeedViewModel @Inject constructor(
 	}
 
 	private suspend fun resolvePreferredLocalIdsByEntity(entityIds: Collection<Long>): Map<Long, Long?> {
-		if (entityIds.isEmpty()) return emptyMap()
-		val identities = workResolver.resolveManyByEntityIds(entityIds)
 		return entityIds.associateWith { entityId ->
-			identities[entityId]?.preferredMangaId
+			workResolver.resolveByEntityId(entityId)?.preferredMangaId
 		}
 	}
 

@@ -621,77 +621,40 @@ class FavouritesRepository @Inject constructor(
 	}
 
 	private suspend fun buildWorkFavouriteCategoryCountEntries(): List<FavouriteCategoryCountEntry> {
-		val activeEntries = db.getWorkFavouritesDao().findActive()
-		val resolved = resolveWorkFavouriteContents(activeEntries)
-		return activeEntries.mapNotNull { entry ->
-			val content = resolved[entry.entityId] ?: return@mapNotNull null
-			FavouriteCategoryCountEntry(
-				mangaId = content.id,
-				categoryId = entry.categoryId,
-				source = content.source.name,
-				isNsfw = content.isNsfw(),
-			)
-		}
+		return db.getWorkFavouritesDao().findActive()
+			.mapNotNull { entry ->
+				val content = resolveWorkFavouriteContent(entry) ?: return@mapNotNull null
+				FavouriteCategoryCountEntry(
+					mangaId = content.id,
+					categoryId = entry.categoryId,
+					source = content.source.name,
+					isNsfw = content.isNsfw(),
+				)
+			}
 	}
 
 	private suspend fun buildWorkFavouriteCategoryIdsByFeedKey(): Map<String, Set<Long>> {
 		val result = LinkedHashMap<String, LinkedHashSet<Long>>()
-		val activeEntries = db.getWorkFavouritesDao().findActive()
-		val resolved = resolveWorkFavouriteContents(activeEntries)
-		for (entry in activeEntries) {
-			val content = resolved[entry.entityId] ?: continue
+		for (entry in db.getWorkFavouritesDao().findActive()) {
+			val content = resolveWorkFavouriteContent(entry) ?: continue
 			result.getOrPut(content.feedLookupKey()) { linkedSetOf() } += entry.categoryId
 		}
 		return result
 	}
 
-	private suspend fun resolveWorkFavouriteContents(entries: Collection<WorkFavouriteEntity>): Map<Long, Content> {
-		if (entries.isEmpty()) return emptyMap()
-
-		val anchorMangaIds = entries.mapNotNull { it.anchorMangaId }.distinct()
-		val entityIds = entries.map { it.entityId }.distinct()
-		val identitiesByEntityId = workResolver.resolveManyByEntityIds(entityIds)
-
-		val allMangaIds = LinkedHashSet<Long>()
-		allMangaIds += anchorMangaIds
-		for (identity in identitiesByEntityId.values) {
-			identity.preferredMangaId?.let { allMangaIds.add(it) }
-			allMangaIds += identity.localMangaIds
+	private suspend fun resolveWorkFavouriteContent(entry: WorkFavouriteEntity): Content? {
+		entry.anchorMangaId?.let { anchorId ->
+			db.getMangaDao().find(anchorId)?.toContent()?.let { return it }
 		}
-
-		val mangaMap = db.getMangaDao().findWithTagsByIds(allMangaIds)
-			.associateBy { it.manga.id }
-
-		val resolvedContents = LinkedHashMap<Long, Content>()
-		for (entry in entries) {
-			val candidateIds = buildList {
-				entry.anchorMangaId?.let(::add)
-				val identity = identitiesByEntityId[entry.entityId]
-				identity?.preferredMangaId?.let(::add)
-				identity?.localMangaIds?.forEach(::add)
-			}.distinct()
-
-			var resolvedContent: Content? = null
-			for (mangaId in candidateIds) {
-				val mangaWithTags = mangaMap[mangaId]
-				if (mangaWithTags != null) {
-					resolvedContent = mangaWithTags.toContent()
-					break
-				}
-			}
-			if (resolvedContent == null) {
-				for (mangaId in candidateIds) {
-					db.getMangaDao().find(mangaId)?.toContent()?.let {
-						resolvedContent = it
-						break
-					}
-				}
-			}
-			if (resolvedContent != null) {
-				resolvedContents[entry.entityId] = resolvedContent!!
-			}
+		val identity = workResolver.resolveByEntityId(entry.entityId)
+		val candidateIds = buildList {
+			identity?.preferredMangaId?.let(::add)
+			identity?.localMangaIds.orEmpty().forEach(::add)
+		}.distinct()
+		for (mangaId in candidateIds) {
+			db.getMangaDao().find(mangaId)?.toContent()?.let { return it }
 		}
-		return resolvedContents
+		return null
 	}
 
 	private fun matchesFavouriteFilters(

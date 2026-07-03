@@ -83,8 +83,6 @@ class DefaultWorkResolverTest {
 		assertNull(resolver.resolveByEntityId(7L))
 	}
 
-
-
 	private fun entity(
 		id: Long,
 		type: EntityType = EntityType.WORK,
