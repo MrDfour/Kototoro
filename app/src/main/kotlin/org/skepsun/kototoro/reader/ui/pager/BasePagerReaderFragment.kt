@@ -35,6 +35,7 @@ import org.skepsun.kototoro.reader.ui.pager.standard.PageAnimTransformer
 import org.skepsun.kototoro.reader.ui.pager.standard.PageHolder
 import org.skepsun.kototoro.reader.ui.pager.standard.PagerEventSupplier
 import org.skepsun.kototoro.reader.ui.pager.standard.PagesAdapter
+import org.skepsun.kototoro.reader.ui.pager.widgets.CurlPageTransformer
 import javax.inject.Inject
 import kotlin.math.absoluteValue
 import kotlin.math.sign
@@ -83,6 +84,7 @@ abstract class BasePagerReaderFragment : BaseReaderFragment<FragmentReaderPagerB
 				ReaderAnimation.NONE -> NoAnimPageTransformer(binding.pager.orientation)
 				ReaderAnimation.DEFAULT -> null
 				ReaderAnimation.ADVANCED -> onCreateAdvancedTransformer()
+				ReaderAnimation.CURL -> onCreateCurlTransformer()
 			}
 			binding.pager.setPageTransformer(transformer)
 			if (transformer == null) {
@@ -185,6 +187,8 @@ abstract class BasePagerReaderFragment : BaseReaderFragment<FragmentReaderPagerB
 	}
 
 	protected open fun onCreateAdvancedTransformer(): PageTransformer = PageAnimTransformer()
+
+	protected open fun onCreateCurlTransformer(): PageTransformer = CurlPageTransformer(isReversed = false, isVertical = false)
 
 	protected open fun onInitPager(pager: ViewPager2) {
 		pager.offscreenPageLimit = 2

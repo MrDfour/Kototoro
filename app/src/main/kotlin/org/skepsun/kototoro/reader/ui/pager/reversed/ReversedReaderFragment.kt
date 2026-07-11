@@ -7,6 +7,7 @@ import org.skepsun.kototoro.core.prefs.AppSettings
 import org.skepsun.kototoro.reader.ui.ReaderState
 import org.skepsun.kototoro.reader.ui.pager.BasePagerReaderFragment
 import org.skepsun.kototoro.reader.ui.pager.ReaderPage
+import org.skepsun.kototoro.reader.ui.pager.widgets.CurlPageTransformer
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -16,6 +17,8 @@ class ReversedReaderFragment : BasePagerReaderFragment() {
 	lateinit var settings: AppSettings
 
 	override fun onCreateAdvancedTransformer(): ViewPager2.PageTransformer = ReversedPageAnimTransformer()
+
+	override fun onCreateCurlTransformer(): ViewPager2.PageTransformer = CurlPageTransformer(isReversed = true, isVertical = false)
 
 	override fun onCreateAdapter() = ReversedPagesAdapter(
 		lifecycleOwner = viewLifecycleOwner,
