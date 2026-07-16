@@ -1,172 +1,221 @@
 # Automatic Translation
 
-Kototoro includes a reader-side OCR + translation workflow designed for practical Android use. This page explains what the feature does, how to set it up, and which choices matter first.
+Kototoro can translate manga and novel content inside the reader. Translation is an optional reader enhancement; normal reading continues when it is disabled or a page cannot be translated.
 
-## What This Feature Does
+## How Translation Works
 
-- OCR happens inside the reading workflow
-- Translation can stay local-first
-- Model management is built into app settings
-- Results are rendered back into the page as an overlay
+Kototoro uses a two-stage pipeline: text is detected and recognized on the page, then the recognized text is sent to the configured translator. The translated result is rendered as a layer over the original image.
 
-## Start Here
+The pipeline supports two translation modes:
 
-- `Settings -> Reader -> Translation`
-- `Settings -> Reader -> Translation -> Manage models`
+| Mode | Actual behavior |
+| --- | --- |
+| `Local` | Tries the configured local ONNX translation model when available, then falls back to the on-device ML Kit translator. It does not call a remote translation API. |
+| `API only` | Sends recognized text to the configured online translation service. The API endpoint must be configured before translation can be enabled. |
 
-## End-to-End Flow
+Older settings values may contain `LOCAL_FIRST`, but the current app normalizes that value to `Local`. It is not an automatic local-to-API fallback mode in the current build.
 
-1. Detect text from page images.
-2. Recognize text with the selected OCR engine and models.
-3. Translate locally or through a configured API.
-4. Render translated text back onto the page.
+## Where To Configure It
+
+Open `Settings -> AI`. The AI settings hub organizes translation features into these sections:
+
+- **Local Model Management** — download, manage, and configure OCR detection, recognition, and super-resolution models
+- **Online Translation Service** — configure the API provider, key, and model
+- **Translation** — choose translation mode, OCR mode, source/target languages, and debug logs
+- **Image Enhancement** — Anime4K, RealCUGAN, and Real-ESRGAN super-resolution model settings
+- **TTS (Text-to-Speech)** — voice reading settings for novels
+- **Video Enhancement** — Anime4K video super-resolution filter presets
+
+### Translation Settings
+
+Open `Settings -> AI -> Translation`. The page contains:
+
+- **Translation mode**: `Local` or `API only`
+- **OCR mode**: `Basic` or `Advanced`
+- **Source and target languages**
+- **Translation debug logs**
+
+When translation mode is `API only`, the settings button opens **Online Translation Service**.
 
 ## First-Time Setup
 
-1. Open translation settings.
-2. Enable translation.
-3. Choose the OCR engine you want to start with.
-4. Open `Manage models`.
-5. Download the OCR and translation-related models you need.
-6. Set source language and target language.
-7. Choose local-first or API mode.
+### Local Translation
 
-## Main User Choices
+1. Open `Settings -> AI -> Translation`.
+2. Choose `Local` translation mode.
+3. Choose the target language. Leave source language on `Automatic` unless recognition is consistently using the wrong language.
+4. Keep OCR mode on `Basic` for the quickest setup.
+5. Open a manga chapter, open the reader configuration panel, and select **Set up manga translation** or **Manga translation**.
 
-### OCR Engine
+Basic OCR uses ML Kit on the device and does not require a manually managed OCR pack. Local translation can use the configured ONNX model when one is available, then uses the on-device ML Kit translation path for text that remains untranslated. Required language models may be downloaded by the underlying on-device services when first used.
 
-The current settings UI is centered around the most practical user-facing options:
+### Advanced Offline OCR
 
-- Fast setup
-- Good starting point for lightweight use cases
-- Depends on device-side ML Kit support
+Choose `Advanced` under **OCR mode** when the basic recognizer is not sufficient for your pages. Kototoro asks to download an advanced OCR pack before enabling this mode. The mode becomes available only after all five required detection and language-recognition models have downloaded and passed verification.
 
-Hybrid OCR is also available when you want a stronger model-backed workflow and are willing to download local assets.
+After the pack is ready, use the settings button on the OCR row to open **Local Model Management**. This screen lets you:
 
-### Translation Mode
+- Choose the text detection and recognition models used by advanced OCR
+- Download or remove supported detector and recognizer models
+- Inspect model version and download status
+- Manage image super-resolution models shown on the same screen
 
-- `LOCAL_ONLY` keeps the workflow device-local where possible.
-- `LOCAL_FIRST` prefers local processing and falls back to a configured API when needed.
-- `API_ONLY` is for users who want remote translation every time.
+Model downloads run in the background and report progress through Android notifications. Deleting a model that belongs to the required advanced pack switches OCR back to `Basic`.
 
-### Languages
+### API-Only Translation
 
-Set the source and target languages before tuning advanced behavior. This avoids chasing OCR or layout issues that are actually language mismatches.
+1. Select `API only` in `Settings -> AI -> Translation`.
+2. Open **Online Translation Service** from the settings button on that row.
+3. Select a provider preset, or select `Custom` and enter a compatible endpoint.
+4. Enter the API key and translation model.
+5. Use **Test connection and choose model** when the provider supports model discovery; otherwise enter the model name manually.
+6. Enable manga translation from the reader.
 
-## Configurable Settings
+The built-in presets are:
 
-Depending on the current build and selected mode, users can configure:
+| Provider | Endpoint | Default model |
+| --- | --- | --- |
+| OpenAI | `api.openai.com/v1/chat/completions` | gpt-5.4-mini |
+| DeepSeek | `api.deepseek.com/chat/completions` | deepseek-v4-flash |
+| Zhipu | `open.bigmodel.cn/api/paas/v4/chat/completions` | glm-5-turbo |
+| Alibaba | `dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` | qwen3.6-flash |
+| Moonshot | `api.moonshot.ai/v1/chat/completions` | kimi-k2.5 |
+| Anthropic | `api.anthropic.com/v1/chat/completions` | claude-sonnet-5 |
+| Gemini | `generativelanguage.googleapis.com/v1beta/openai/chat/completions` | gemini-3.5-flash |
+| OpenRouter | `openrouter.ai/api/v1/chat/completions` | openai/gpt-5.4-mini |
 
-- OCR engine
-- Detection / recognition model selection
-- Source language
-- Target language
-- API endpoint
-- API key
-- API provider preset
-- API model name
-- Bubble grouping behavior
-- Overlay compactness
-- Debug logging
+Provider presets supply the endpoint and default model. `Custom` exposes the endpoint and JSON custom-header fields.
 
-## Current Render Behavior
+## Using Translation In The Reader
 
-Recent work on the reader overlay has focused on a specific class of problems:
+### Manga Translation
 
-- OCR text is complete
-- translation text is complete
-- final overlay text is still clipped, offset, or visually inconsistent across nearby regions
+The reader's translation shortcut is hidden when the work language already matches the configured target language. In that case, Kototoro skips translation and explains why.
 
-The current render path now behaves more defensibly than earlier builds:
+For a work that needs translation:
 
-- single-region overlays are solved through a unified fit pass instead of ad-hoc text-size retries
-- horizontal and vertical text are drawn from measured layout bounds, which reduces the classic "background box looks right but text is shifted left/right" failure
-- local expansion is applied around the current text region when the first fit still overflows
-- multi-region bubbles can be rendered through a conservative segmented flow instead of blindly stretching one merged rectangle across unrelated OCR fragments
-- heavily overlapping sparse bubbles are filtered before drawing, which reduces obviously wrong large blank overlays caused by tiny text such as page numbers or decoration
+1. Open the reader configuration panel.
+2. Select **Manga translation**. If no usable translation engine is configured, the app opens translation settings instead.
+3. After it is enabled, use the reader translation control to switch between the translated rendering and the original image.
+4. Open the configuration panel again for **Retranslate** and the **Translation task panel**.
 
-This does not mean every edge case is solved. The hardest failures now usually come from:
+Retranslate supports the current page, failed pages in the current chapter, and the full current chapter. The task panel lists current-chapter pages with ready, running, and failed states, lets you filter the list, retry failed pages, and inspect page logs and chapter timing summaries.
 
-- incorrect merge quality upstream
-- unstable source content rects from OCR grouping
-- detector regions that are valid for recognition but still awkward for translated overlay geometry
-- very dense mixed-layout bubbles where several small regions compete inside one large speech area
+### Novel Translation
 
-In practical terms, the main priority of the current branch is:
+Novel translation is available when reading novel content. The processor reuses the same translation engine as manga translation but handles text differently:
 
-```text
-show the whole translation first,
-then keep font size and box size visually reasonable.
+- Chapters are split into paragraphs
+- Paragraphs are batched and sent to the translation coordinator
+- Results are emitted progressively via Flow for streaming rendering
+- A text cache avoids re-translating duplicate text
+
+**Display modes:**
+
+| Mode | Behavior |
+| --- | --- |
+| `Translation only` | Replaces the original text with the translated text |
+| `Bilingual` | Shows the original text in gray above the translated text |
+
+To use novel translation:
+
+1. Open a novel chapter in the reader.
+2. Open the reader configuration panel.
+3. Enable **Novel translation**.
+4. Choose the display mode: `Translation only` or `Bilingual`.
+5. The translated text streams in progressively as the engine processes paragraphs.
+
+Novel translation uses the same translation engine and API configuration as manga translation.
+
+## Languages And Results
+
+`Automatic` source language first follows the current work/source language where that information is available. For remaining text, the translation coordinator performs language detection before translation. Select an explicit source language when the detected language is wrong or when a mixed-language page gives inconsistent results.
+
+The rendered result is a translated layer over the original image. Kototoro keeps the original page available, so a failed page or an unsatisfactory overlay does not prevent reading.
+
+Text regions may still be difficult to render well when the source has dense mixed layouts, decorative text, fragmented speech bubbles, or incorrect OCR grouping. Problems in those cases can originate in detection or region grouping rather than in the translation itself.
+
+## Debugging And Privacy
+
+Enable **Translation debug logs** only while investigating a problem. It writes concise OCR and translation diagnostics to Logcat.
+
+`Local` mode keeps text translation on-device after any required model downloads. `API only` sends recognized text to the endpoint configured in the app; review that provider's privacy and retention policy before using it for material you do not want to share remotely.
+
+## Architecture Overview
+
+```
+Page image
+  → Bubble detection (OnnxBubbleDetectorEngine / BubbleReaderTextDetector)
+  → Text recognition (ML Kit / PaddleOCR / MangaOCR)
+  → Text grouping and merging (ReaderBubbleGroupingCoordinator / ReaderTextMergeCoordinator)
+  → Translation (ONNX local / ML Kit local / API provider)
+  → Render overlay (ReaderBubbleRenderCoordinator / ReaderPageTranslationProcessor)
 ```
 
-That tradeoff is intentional.
+### Key Components
 
-## Model Management
-
-The model management screen is used to inspect and download built-in OCR and ONNX-related models.
-
-Current categories include:
-
-- Recognition models
-- Detection models
-- Classic translation models
-- General LLM models
-- Bubble detector models
-
-Downloaded status is shown per model, and missing models can be downloaded on demand from inside the app.
-
-## Practical Recommendations
-
-- Start simple: enable translation, choose an OCR engine, and download only the models you need.
-- Use `LOCAL_FIRST` if you want local behavior without losing a remote fallback path.
-- Test on a few representative pages before tuning compactness or bubble grouping.
-- If you depend on offline use, complete model downloads before travel or unstable-network use.
+| Component | Path |
+| --- | --- |
+| Translation coordinator | `reader/translate/domain/ReaderTranslationCoordinator.kt` |
+| Page translation processor | `reader/translate/domain/ReaderPageTranslationProcessor.kt` |
+| ONNX translation engine | `reader/translate/domain/OnnxReaderTranslationEngine.kt` |
+| Bubble detector (ONNX) | `reader/translate/domain/OnnxBubbleDetectorEngine.kt` |
+| Bubble text detector | `reader/translate/domain/BubbleReaderTextDetector.kt` |
+| ML Kit OCR engine | `reader/translate/domain/MlKitReaderOcrEngine.kt` |
+| PaddleOCR engine | `reader/translate/domain/PaddleReaderOcrEngine.kt` |
+| MangaOCR recognizer | `reader/translate/domain/MangaOcrReaderTextRecognizer.kt` |
+| ONNX model manager | `reader/translate/data/OnnxModelManager.kt` |
+| Paddle model manager | `reader/translate/data/PaddleModelManager.kt` |
+| API provider catalog | `reader/translate/domain/TranslationApiProviderCatalog.kt` |
+| Novel translation processor | `reader/novel/NovelTranslationProcessor.kt` |
+| Translation task panel UI | `reader/ui/TranslationTaskPanelSheet.kt` |
+| Translation settings screen | `settings/TranslationSettingsFragment.kt` |
+| API settings screen | `settings/TranslationApiSettingsFragment.kt` |
+| OCR models screen | `settings/OcrModelsFragment.kt` |
+| AI settings hub | `settings/compose/AISettingsScreen.kt` |
 
 ## Common Problems
 
-### The translation overlay does not appear
+### Translation does not start
 
-- Confirm that translation is enabled.
-- Confirm source and target languages are set correctly.
-- Confirm the required local models were downloaded.
+- Check that the work language and target language are different.
+- In `API only` mode, configure the endpoint, key, and model before enabling translation.
+- For advanced OCR, wait for the complete model pack to download and verify.
+- Try a page with clear, readable text first.
 
-### The model list is visible but downloads fail
+### Local translation is incomplete
 
-- Check network connectivity.
-- Check available storage.
-- Reopen the screen and retry the download.
+- Confirm the source and target languages are supported by the device-side translator.
+- Try an explicit source language instead of `Automatic`.
+- Use advanced OCR if basic OCR is not recognizing the page correctly.
+- If using local ONNX translation, verify the model is downloaded and compatible.
+- Use `API only` only when you have configured and intend to use a remote provider; it is a separate mode, not a fallback for local translation.
 
-### API translation is not working
+### API translation fails
 
-- Confirm endpoint, API key, and model name.
-- If model discovery fails, enter the model name manually.
-- Prefer `LOCAL_FIRST` while validating a new remote provider.
+- Confirm the provider preset or custom endpoint is correct.
+- Recheck the API key and model name.
+- Use **Test connection and choose model** when available.
+- If model discovery is unavailable, enter the provider's model identifier manually.
 
-### The overlay background is correct but some translated text is still clipped
+### The translated layer is clipped or uneven
 
-- This is now more likely to be a layout-fit or source-rect problem than a missing translation problem.
-- Small residual clipping can still happen when local expansion hits page bounds or when the grouped source regions are already inconsistent.
-- If debug logging is enabled, compare source rect, content rect, prepared rect, and final content area before assuming OCR dropped text.
+- Compare with the original image to determine whether the text was recognized correctly.
+- Try a simpler page to distinguish layout issues from OCR or translation failures.
+- Enable debug logs and inspect the page task log before reporting an issue.
 
-### The same speech bubble contains normal text in one region and oversized text in another
+### Novel translation is slow or incomplete
 
-- This usually points to fragment grouping quality rather than translation quality.
-- The current build reduces aggressive short-text auto-enlargement and keeps segmented rendering conservative, but a bad merge upstream can still produce uneven visual weight.
+- Novel translation processes paragraphs in batches; larger chapters take longer.
+- The text cache avoids re-translating duplicate text, but first-time translation of long chapters is inherently slow.
+- Try reducing batch size through the API concurrency settings.
 
 See also: [Troubleshooting](./troubleshooting.md)
-
-## Advanced Notes
-
-The project contains multiple OCR runtime paths internally, including model-backed pipelines for users who need stronger offline or hybrid workflows. The exact user-facing choices may evolve across builds, but model management remains the entry point for downloading the required local assets.
 
 ## Related Documents
 
 - [Documentation Hub](./README.md)
 - [Getting Started](./getting-started.md)
 - [Reader Features](./reader-features.md)
-- [OCR Architecture Review](./architecture/ocr-architecture-review.md)
-- [OCR Pipeline](./architecture/ocr-pipeline-v2.md)
-- [Source Integrations](./source-integrations.md)
 - [FAQ](./faq.md)
 - [Troubleshooting](./troubleshooting.md)
-- [Development Notes](./development.md)

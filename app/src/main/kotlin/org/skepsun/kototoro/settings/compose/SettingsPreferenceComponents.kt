@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -32,7 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import org.skepsun.kototoro.core.ui.glass.ApplyDynamicArtworkBlurDialogStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -49,9 +52,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.skepsun.kototoro.R
 import org.skepsun.kototoro.core.ui.compose.rememberSafePainter
+import org.skepsun.kototoro.core.ui.compose.KototoroSlider
 import org.skepsun.kototoro.core.ui.theme.LocalMaterialExpressiveComponentsEnabled
 import kotlin.math.roundToInt
 
@@ -59,6 +64,20 @@ data class SettingsChoiceOption<T>(
     val value: T,
     val label: String,
 )
+
+@Composable
+fun SettingsGroupSurface(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
+    ) {
+        Column(content = content)
+    }
+}
 
 @Composable
 fun SettingsPreferenceSection(
@@ -80,7 +99,13 @@ fun SettingsPreferenceSection(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             )
         }
-        content()
+        if (expressive) {
+            SettingsGroupSurface {
+                content()
+            }
+        } else {
+            content()
+        }
     }
 }
 
@@ -298,6 +323,8 @@ fun <T> SettingsChoicePreference(
     options: List<SettingsChoiceOption<T>>,
     summary: String? = null,
     enabled: Boolean = true,
+	onSettingsClick: (() -> Unit)? = null,
+	settingsContentDescription: String? = null,
     onValueChange: (T) -> Unit,
 ) {
     var isDialogVisible by remember { mutableStateOf(false) }
@@ -336,6 +363,15 @@ fun <T> SettingsChoicePreference(
             }
         }
         Spacer(modifier = Modifier.width(8.dp))
+		if (onSettingsClick != null) {
+			IconButton(onClick = onSettingsClick, enabled = enabled) {
+				Icon(
+					imageVector = Icons.Filled.Settings,
+					contentDescription = settingsContentDescription,
+					tint = MaterialTheme.colorScheme.onSurfaceVariant,
+				)
+			}
+		}
         Icon(
             imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
@@ -344,6 +380,7 @@ fun <T> SettingsChoicePreference(
     }
 
     if (isDialogVisible) {
+        ApplyDynamicArtworkBlurDialogStyle()
         AlertDialog(
             onDismissRequest = { isDialogVisible = false },
             title = { Text(text = title) },
@@ -447,6 +484,7 @@ fun <T> SettingsMultiChoicePreference(
     }
 
     if (isDialogVisible) {
+        ApplyDynamicArtworkBlurDialogStyle()
         AlertDialog(
             onDismissRequest = { isDialogVisible = false },
             title = { Text(text = title) },
@@ -540,7 +578,7 @@ fun SettingsSliderPreference(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Slider(
+        KototoroSlider(
             value = sliderValue,
             onValueChange = {
                 sliderValue = it
@@ -676,6 +714,7 @@ fun SettingsDialogTextPreference(
     }
 
     if (isDialogVisible) {
+        ApplyDynamicArtworkBlurDialogStyle()
         AlertDialog(
             onDismissRequest = {
                 isSuggestionsExpanded = false
@@ -812,6 +851,7 @@ fun SettingsReorderPreference(
     }
 
     if (isDialogVisible) {
+        ApplyDynamicArtworkBlurDialogStyle()
         AlertDialog(
             onDismissRequest = { isDialogVisible = false },
             title = { Text(text = title) },
@@ -902,14 +942,18 @@ fun SettingsReorderPreference(
 
 @Composable
 fun SettingsSectionDivider() {
-    if (LocalMaterialExpressiveComponentsEnabled.current) {
-        Spacer(modifier = Modifier.height(2.dp))
-    } else {
-        HorizontalDivider(
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp),
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f),
-        )
-    }
+    SettingsGroupDivider()
+}
+
+@Composable
+fun SettingsGroupDivider(
+    startPadding: Dp = 20.dp,
+    endPadding: Dp = 20.dp,
+) {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = startPadding, end = endPadding),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f),
+    )
 }
 
 @Composable
@@ -920,10 +964,9 @@ private fun Modifier.settingsPreferenceLayout(enabled: Boolean): Modifier {
         .then(
             if (expressive) {
                 Modifier
-                    .padding(horizontal = 8.dp)
                     .background(
                         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(0.dp),
                     )
                     .padding(horizontal = 14.dp, vertical = 12.dp)
             } else {

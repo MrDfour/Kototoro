@@ -22,6 +22,7 @@ import org.skepsun.kototoro.core.db.entity.toEntity
 import org.skepsun.kototoro.core.db.entity.toEntities
 import org.skepsun.kototoro.core.parser.ContentDataRepository
 import org.skepsun.kototoro.core.prefs.AppSettings
+import org.skepsun.kototoro.core.prefs.observeAsFlow
 import org.skepsun.kototoro.core.util.ext.mapItems
 import org.skepsun.kototoro.core.util.ext.toInstantOrNull
 import org.skepsun.kototoro.details.domain.ProgressUpdateUseCase
@@ -40,6 +41,7 @@ import org.skepsun.kototoro.tracker.ui.debug.TrackDebugItem
 import org.skepsun.kototoro.work.domain.WorkAggregate
 import org.skepsun.kototoro.work.domain.WorkAggregateRepository
 import org.skepsun.kototoro.work.domain.WorkIdentity
+import org.skepsun.kototoro.work.domain.WorkMigrationState
 import org.skepsun.kototoro.work.domain.WorkResolver
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
@@ -102,11 +104,9 @@ class TrackingRepository @Inject constructor(
 	}
 
 	fun observeUnreadUpdatesCount(): Flow<Int> {
-		return combine(
-			db.getTrackLogsDao().observeUnreadCount(),
-			db.getTracksDao().observeUpdateContentCount(),
-		) { unreadLogs, updatedContent ->
-			maxOf(unreadLogs, updatedContent)
+		val lastOpenTimeFlow = settings.observeAsFlow(AppSettings.KEY_FEED_LAST_OPEN_TIME) { feedLastOpenTime }
+		return lastOpenTimeFlow.flatMapLatest { lastOpenTime ->
+			db.getTracksDao().observeUnreadWorkCount(lastOpenTime)
 		}
 	}
 
@@ -191,6 +191,12 @@ class TrackingRepository @Inject constructor(
 			?: db.getMangaDao().find(anchorMangaId)?.toContent()
 	}
 
+	suspend fun hasValidTrackingIdentity(track: ContentTracking): Boolean {
+		val entityId = track.entityId ?: return false
+		val identity = resolveTrackIdentity(track.anchorMangaId)
+		return identity.migrationState == WorkMigrationState.VALID && identity.entityId == entityId
+	}
+
 	@VisibleForTesting
 	suspend fun deleteTrack(mangaId: Long) {
 		val anchorMangaId = resolvePersistableTrackAnchorMangaId(mangaId) ?: return
@@ -240,19 +246,26 @@ class TrackingRepository @Inject constructor(
 
 	suspend fun saveUpdates(updates: MangaUpdates) {
 		db.withTransaction {
-			val anchorMangaId = resolvePersistableTrackAnchorMangaId(updates.manga.id) ?: return@withTransaction
-			val entityId = resolveTrackIdentity(anchorMangaId).entityId
+			val entityId = updates.entityId ?: return@withTransaction
+			val anchorMangaId = updates.anchorMangaId
+			val identity = resolveTrackIdentity(anchorMangaId)
+			if (
+				identity.migrationState != WorkMigrationState.VALID ||
+				identity.entityId != entityId ||
+				!db.getMangaDao().contains(anchorMangaId)
+			) {
+				return@withTransaction
+			}
 			val track = getOrCreateTrack(anchorMangaId).mergeWith(updates, anchorMangaId)
 			db.getTracksDao().upsert(track)
 			
-			val updatedManga = updates.manga
-			val resolvedManga = contentDataRepository.resolveStoredProjection(updatedManga)
-			if (db.getMangaDao().contains(resolvedManga.id)) {
-				contentDataRepository.updateProjectionSnapshot(resolvedManga)
-			}
+			val resolvedManga = contentDataRepository.updateProjectionSnapshotAtAnchor(
+				manga = updates.manga,
+				anchorMangaId = anchorMangaId,
+			)
 
 			if (updates is MangaUpdates.Success && updates.isValid && updates.newChapters.isNotEmpty()) {
-				progressUpdateUseCase(updates.manga)
+				progressUpdateUseCase(resolvedManga)
 				val logEntity = TrackLogEntity(
 					ownerId = resolveTrackOwnerId(entityId, anchorMangaId),
 					mangaId = anchorMangaId,
@@ -285,7 +298,14 @@ class TrackingRepository @Inject constructor(
 
 	suspend fun clearReadUpdates(mangaId: Long) = db.withTransaction {
 		for (anchorMangaId in resolveTrackAnchorMangaIdsForRead(mangaId)) {
-			clearTrackUpdates(anchorMangaId)
+			markTrackLogsAsRead(anchorMangaId)
+		}
+	}
+
+	private suspend fun markTrackLogsAsRead(anchorMangaId: Long) {
+		val track = db.getTracksDao().find(anchorMangaId)
+		track?.let {
+			db.getTrackLogsDao().markUnreadAsReadByOwner(it.ownerId)
 		}
 	}
 
@@ -358,7 +378,15 @@ class TrackingRepository @Inject constructor(
 				mangaId = anchorMangaId,
 				entityId = entityId,
 				lastChapterId = updates.manga.getChapters(updates.branch).lastOrNull()?.id ?: NO_ID,
-				newChapters = if (updates.isValid) newChapters + updates.newChapters.size else 0,
+				newChapters = if (updates.isValid) {
+					if (updates.newChapters.isNotEmpty()) {
+						updates.newChapters.size
+					} else {
+						newChapters
+					}
+				} else {
+					0
+				},
 				lastCheckTime = System.currentTimeMillis(),
 				lastChapterDate = updates.lastChapterDate().ifZero { lastChapterDate },
 				lastResult = if (updates.isNotEmpty()) TrackEntity.RESULT_HAS_UPDATE else TrackEntity.RESULT_NO_UPDATE,
@@ -512,7 +540,9 @@ class TrackingRepository @Inject constructor(
 		}
 		val chapters = db.getChaptersDao()
 			.findAllByMangaIds(tracks.map { it.manga.id })
-		return TrackingLogItemMapper.fromAllTrackedContent(tracks, chapters)
+		val trackOwnerIds = tracks.map { track -> resolveTrackOwnerId(track.entityId, track.manga.id) }
+		val unreadOwnerIds = db.getTrackLogsDao().findUnreadOwnerIds(trackOwnerIds).toSet()
+		return TrackingLogItemMapper.fromAllTrackedContent(tracks, chapters, unreadOwnerIds)
 	}
 
 	private suspend fun buildFallbackContentByAnchorId(anchorIds: Collection<Long>): Map<Long, Content> {

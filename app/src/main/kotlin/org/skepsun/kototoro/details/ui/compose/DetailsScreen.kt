@@ -19,6 +19,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -68,16 +69,21 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Slider
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.animation.core.tween
@@ -102,6 +108,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -155,6 +162,7 @@ import org.skepsun.kototoro.core.nav.AppRouter
 import org.skepsun.kototoro.core.prefs.AppSettings
 import org.skepsun.kototoro.core.prefs.observeAsState
 import org.skepsun.kototoro.core.ui.compose.KototoroPullToRefreshBox
+import org.skepsun.kototoro.core.ui.compose.KototoroSlider
 import org.skepsun.kototoro.core.ui.compose.sharedCoverMemoryCacheKey
 import org.skepsun.kototoro.core.nav.PendingDetailsNavigation
 import org.skepsun.kototoro.core.util.FoldableUtils
@@ -162,6 +170,7 @@ import org.skepsun.kototoro.core.ui.compose.rememberSafePainter
 import org.skepsun.kototoro.core.ui.compose.rememberResolvedSourceTitle
 import org.skepsun.kototoro.core.ui.util.ReversibleActionObserver
 import org.skepsun.kototoro.core.ui.glass.GlassComponentRole
+import org.skepsun.kototoro.core.ui.glass.GlassBottomBarContainer
 import org.skepsun.kototoro.core.ui.glass.GlassDefaults
 import org.skepsun.kototoro.core.ui.glass.GlassSurface
 import org.skepsun.kototoro.core.ui.glass.GlassVisualTreatment
@@ -256,6 +265,16 @@ private fun rememberDetailsBottomBarGlassPrefs() =
 private val DetailsTopPrimaryActionButtonSize = CompactTopBarPillHeight
 private val DetailsTopCompactActionButtonSize = CompactTopBarCompactButtonSize
 private val DetailsTopActionIconSize = CompactTopBarIconSize
+private val ModernDetailsDockHeight = 86.dp
+private val ModernDetailsDockBottomClearance = 16.dp
+private val DetailsDockContentHorizontalPadding = 8.dp
+private val ModernDetailsDockCompactPrimaryWidth = 112.dp
+private val ModernDetailsDockToolsWidth = 112.dp
+private val ModernDetailsDockTabSlotWidth = 50.dp
+private val ModernDetailsDockMoreButtonWidth = 40.dp
+private val ModernDetailsDockChromeHeight = 52.dp
+private val ModernDetailsDockExpandedPanelGap = 12.dp
+private const val ModernDetailsDockAnimationDurationMillis = 380
 private const val PageThumbnailAspectRatioMin = 0.35f
 private const val PageThumbnailAspectRatioMax = 1f
 private const val PageThumbnailHeightRatioMin = 1f
@@ -435,10 +454,18 @@ fun DetailsScreen(
     val isWideAdaptiveLayout = remember(context, configuration.orientation, configuration.screenWidthDp, tabletUiMode) {
         FoldableUtils.shouldUseTabletLayout(context, settings, configuration)
     }
+    val isModernDetailsDockEnabled by settings.observeAsState(AppSettings.KEY_MODERN_DETAILS_DOCK) {
+        isModernDetailsDockEnabled
+    }
     val density = LocalDensity.current
     val navigationBarBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val compactPaneCollapsedHeight = remember(navigationBarBottomPadding) {
-        (68.dp + navigationBarBottomPadding).coerceIn(88.dp, 120.dp)
+    val compactPaneCollapsedHeight = remember(navigationBarBottomPadding, isModernDetailsDockEnabled) {
+        if (isModernDetailsDockEnabled) {
+            (ModernDetailsDockHeight + navigationBarBottomPadding + ModernDetailsDockBottomClearance)
+                .coerceIn(112.dp, 160.dp)
+        } else {
+            (68.dp + navigationBarBottomPadding).coerceIn(88.dp, 120.dp)
+        }
     }
     val detailsPaneState = rememberDetailsPaneState(
         screenHeightDp = configuration.screenHeightDp,
@@ -457,6 +484,45 @@ fun DetailsScreen(
     }
     val sheetTabSelection = remember(detailsPaneState.selectedTabId, availableTabIds) {
         detailsPaneState.resolvedSelectedTabId(availableTabIds)
+    }
+    var isModernDockCompact by rememberSaveable { mutableStateOf(false) }
+    val modernDockCollapseThresholdPx = with(density) { 32.dp.roundToPx() }
+    val modernDockExpandThresholdPx = with(density) { 16.dp.roundToPx() }
+    LaunchedEffect(
+        isModernDetailsDockEnabled,
+        isWideAdaptiveLayout,
+        compactPaneAnchor,
+        scrollState,
+        modernDockCollapseThresholdPx,
+        modernDockExpandThresholdPx,
+    ) {
+        if (!isModernDetailsDockEnabled || isWideAdaptiveLayout || compactPaneAnchor != CompactDetailsPaneAnchor.Collapsed) {
+            isModernDockCompact = false
+            return@LaunchedEffect
+        }
+        var lastScrollValue = scrollState.value
+        var accumulatedScroll = 0
+        snapshotFlow { scrollState.value }.collect { currentScrollValue ->
+            val delta = currentScrollValue - lastScrollValue
+            lastScrollValue = currentScrollValue
+            if (delta == 0) return@collect
+
+            accumulatedScroll = when {
+                delta > 0 && accumulatedScroll < 0 -> delta
+                delta < 0 && accumulatedScroll > 0 -> delta
+                else -> accumulatedScroll + delta
+            }
+            when {
+                accumulatedScroll >= modernDockCollapseThresholdPx -> {
+                    isModernDockCompact = true
+                    accumulatedScroll = 0
+                }
+                accumulatedScroll <= -modernDockExpandThresholdPx -> {
+                    isModernDockCompact = false
+                    accumulatedScroll = 0
+                }
+            }
+        }
     }
     LaunchedEffect(isWideAdaptiveLayout, detailsPaneState.chapterSelectionState) {
         if (!isWideAdaptiveLayout && detailsPaneState.chapterSelectionState != null) {
@@ -717,12 +783,25 @@ fun DetailsScreen(
     val openPaneTab: (Int) -> Unit = remember(
         isWideAdaptiveLayout,
         compactPaneAnchor,
+        sheetTabSelection,
+        isModernDetailsDockEnabled,
         persistSelectedPaneTab,
     ) {
         { requestedTabId ->
+            val shouldCollapseModernPane = isModernDetailsDockEnabled &&
+                !isWideAdaptiveLayout &&
+                compactPaneAnchor != CompactDetailsPaneAnchor.Collapsed &&
+                requestedTabId == sheetTabSelection
+            if (isModernDetailsDockEnabled) {
+                isModernDockCompact = false
+            }
             persistSelectedPaneTab(requestedTabId)
             if (!isWideAdaptiveLayout) {
-                detailsPaneState.onOpenPaneRequested()
+                if (shouldCollapseModernPane) {
+                    detailsPaneState.animateTo(CompactDetailsPaneAnchor.Collapsed)
+                } else {
+                    detailsPaneState.onOpenPaneRequested()
+                }
             }
         }
     }
@@ -895,7 +974,7 @@ fun DetailsScreen(
                                 ownerKey = content?.url,
                                 url = normalizedFallbackCoverUrl,
                             )
-                        }
+                            }
                         val request = remember(content?.source?.name, content?.url, currentPanoramaCoverUrl) {
                             currentPanoramaCoverUrl?.let { coverUrl ->
                                 val panoramaCacheKey = sharedCoverMemoryCacheKey(
@@ -1051,6 +1130,7 @@ fun DetailsScreen(
                                             else -> R.string.open_reading_page_in_browser
                                         },
                                         hasOnlineVariant = isWorkActionEnabled && remoteContent != null,
+                                        isReadingRecordAvailable = isWorkActionEnabled,
                                         isDeleteLocalAvailable = isWorkActionEnabled && content?.source == LocalMangaSource,
                                         isEditOverrideAvailable = isWorkActionEnabled && content != null,
                                         isShortcutSupported = isWorkActionEnabled && isShortcutSupported && content != null,
@@ -1152,17 +1232,12 @@ fun DetailsScreen(
                                     translatedTitle = translatedTitle,
                                     translatedDescription = translatedDescription,
                                     isShowingTranslation = isShowingTranslation,
-                                    hasTranslationCache = hasTranslationCache,
-                                    isTranslating = isTranslating,
-                                    showTranslateAction = showTranslateAction,
                                     settings = settings,
                                     collapseProgressProvider = remember { { 0f } },
                                     coverVisualAlpha = 1f,
                                     coverUrl = mangaDetails?.coverUrl?.takeIfUsableImageUri()
                                         ?: content?.coverUrl?.takeIfUsableImageUri(),
                                     fallbackCoverUrl = content?.coverUrl?.takeIfUsableImageUri(),
-                                    showCommentsAction = supplementalCommentThreads.isNotEmpty(),
-                                    showReviewsAction = supplementalReviews.isNotEmpty(),
                                     content = content,
                                     isTemporaryReadOnly = isTemporaryReadOnly,
                                     isWorkDetails = isWorkDetails,
@@ -1173,8 +1248,6 @@ fun DetailsScreen(
                                     },
                                     onInfoCardBoundsSync = syncInfoCardBounds,
                                     onFavoriteClick = { showFavoriteDialog = true },
-                                    onCommentsClick = { showCommentsDialog = true },
-                                    onReviewsClick = { showReviewsDialog = true },
                                     onSupplementalRelationClick = { item ->
                                         when {
                                             shouldOpenTrackingRelationSheet(item) -> {
@@ -1185,8 +1258,6 @@ fun DetailsScreen(
                                             }
                                         }
                                     },
-                                    onSelectActiveLocalSource = viewModel::selectActiveLocalSource,
-                                    onSelectMetadataSource = viewModel::selectMetadataSource,
                                     onOpenMetadataSourceSheet = {
                                         if (!isTemporaryReadOnly) showMetadataSourceDialog = true
                                     },
@@ -1268,6 +1339,8 @@ fun DetailsScreen(
                                     onPageThumbnailAspectRatioChange = updatePageThumbnailAspectRatio,
                                     onTogglePageThumbnailsFitPreview = togglePageThumbnailsFitPreview,
                                     showCollapsedHandle = false,
+                                    isModernDetailsDockEnabled = false,
+                                    isModernDockCompact = false,
                                     onSelectedTabIdChange = persistSelectedPaneTab,
                                     onActionClick = handleActionClick,
                                 )
@@ -1330,17 +1403,12 @@ fun DetailsScreen(
                                 translatedTitle = translatedTitle,
                                 translatedDescription = translatedDescription,
                                 isShowingTranslation = isShowingTranslation,
-                                hasTranslationCache = hasTranslationCache,
-                                isTranslating = isTranslating,
-                                showTranslateAction = showTranslateAction,
                                 settings = settings,
                                 collapseProgressProvider = compactCollapseProgressProvider,
                                 coverVisualAlpha = headerCoverVisualAlpha,
                                 coverUrl = mangaDetails?.coverUrl?.takeIfUsableImageUri()
                                     ?: content?.coverUrl?.takeIfUsableImageUri(),
                                 fallbackCoverUrl = content?.coverUrl?.takeIfUsableImageUri(),
-                                showCommentsAction = supplementalCommentThreads.isNotEmpty(),
-                                showReviewsAction = supplementalReviews.isNotEmpty(),
                                 content = content,
                                 isTemporaryReadOnly = isTemporaryReadOnly,
                                 isWorkDetails = isWorkDetails,
@@ -1351,8 +1419,6 @@ fun DetailsScreen(
                                 },
                                 onInfoCardBoundsSync = syncInfoCardBounds,
                                 onFavoriteClick = { showFavoriteDialog = true },
-                                onCommentsClick = { showCommentsDialog = true },
-                                onReviewsClick = { showReviewsDialog = true },
                                 onSupplementalRelationClick = { item ->
                                     when {
                                         shouldOpenTrackingRelationSheet(item) -> {
@@ -1363,8 +1429,6 @@ fun DetailsScreen(
                                         }
                                     }
                                 },
-                                onSelectActiveLocalSource = viewModel::selectActiveLocalSource,
-                                onSelectMetadataSource = viewModel::selectMetadataSource,
                                 onOpenMetadataSourceSheet = {
                                     if (!isTemporaryReadOnly) showMetadataSourceDialog = true
                                 },
@@ -1389,6 +1453,7 @@ fun DetailsScreen(
                 if (isWorkDetails) {
                     DetailsPaneHost(
                         state = detailsPaneState,
+                        dragEnabled = !isModernDetailsDockEnabled,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .fillMaxWidth(),
@@ -1443,6 +1508,8 @@ fun DetailsScreen(
                             onPageThumbnailAspectRatioChange = updatePageThumbnailAspectRatio,
                             onTogglePageThumbnailsFitPreview = togglePageThumbnailsFitPreview,
                             showCollapsedHandle = true,
+                            isModernDetailsDockEnabled = isModernDetailsDockEnabled,
+                            isModernDockCompact = isModernDockCompact,
                             onSelectedTabIdChange = persistSelectedPaneTab,
                             onActionClick = handleActionClick,
                         )
@@ -1452,18 +1519,23 @@ fun DetailsScreen(
             val detailsImmersiveStrength = ((LocalGlassPrefs.current?.immersiveStrengthPercent ?: 65).coerceIn(0, 100)) / 100f
             val detailsImmersiveIsDark = isSystemInDarkTheme()
             val detailsImmersiveBase = if (detailsImmersiveIsDark) Color.Black else Color.White
+            val detailsTopImmersiveAlpha = if (isWideAdaptiveLayout) {
+                detailsGradientAlpha
+            } else {
+                detailsGradientAlpha * (1f - compactSheetExpansionProgress).coerceIn(0f, 1f)
+            }
             val detailsTopImmersiveHeight = with(density) {
                 val sbPx = statusBarTopPadding.roundToPx()
                 val tbPx = DetailsTopBarHeight.roundToPx()
                 val overflowPx = 6.dp.roundToPx()
                 (sbPx + tbPx + overflowPx).coerceAtLeast(sbPx + overflowPx).toDp()
             }
-            if (detailsGradientAlpha > 0.01f) {
+            if (detailsTopImmersiveAlpha > 0.01f) {
                 ImmersiveEdgeGradient(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
-                        .graphicsLayer { alpha = detailsGradientAlpha },
+                        .graphicsLayer { alpha = detailsTopImmersiveAlpha },
                     height = detailsTopImmersiveHeight,
                     colors = listOf(
                         detailsImmersiveBase.copy(alpha = (0.72f + (0.98f - 0.72f) * detailsImmersiveStrength)),
@@ -2366,16 +2438,11 @@ private fun DetailsScrollableContent(
     translatedTitle: String?,
     translatedDescription: String?,
     isShowingTranslation: Boolean,
-    hasTranslationCache: Boolean,
-    isTranslating: Boolean,
-    showTranslateAction: Boolean,
     settings: org.skepsun.kototoro.core.prefs.AppSettings,
     collapseProgressProvider: () -> Float,
     coverVisualAlpha: Float,
     coverUrl: String?,
     fallbackCoverUrl: String?,
-    showCommentsAction: Boolean,
-    showReviewsAction: Boolean,
     content: org.skepsun.kototoro.parsers.model.Content?,
     isTemporaryReadOnly: Boolean,
     isWorkDetails: Boolean,
@@ -2389,11 +2456,7 @@ private fun DetailsScrollableContent(
     pendingAuthorSearch: (String, ContentSource) -> Unit,
     onInfoCardBoundsSync: (Float, Float) -> Unit,
     onFavoriteClick: () -> Unit,
-    onCommentsClick: () -> Unit,
-    onReviewsClick: () -> Unit,
     onSupplementalRelationClick: (EntityRelationItem) -> Unit,
-    onSelectActiveLocalSource: (Long) -> Unit,
-    onSelectMetadataSource: (DetailsSourceOption) -> Unit,
     onOpenMetadataSourceSheet: () -> Unit,
     onOpenReadingSourceSheet: () -> Unit,
     onUpdateLinkedTrackingStatus: (org.skepsun.kototoro.details.ui.model.LinkedTrackingItemUiModel, ScrobblingStatus) -> Unit,
@@ -2450,9 +2513,6 @@ private fun DetailsScrollableContent(
             translatedTitle = translatedTitle,
             translatedDescription = translatedDescription,
             isShowingTranslation = isShowingTranslation,
-            hasTranslationCache = hasTranslationCache,
-            isTranslating = isTranslating,
-            showTranslateAction = showTranslateAction,
             settings = settings,
             collapseProgressProvider = collapseProgressProvider,
             coverVisualAlpha = coverVisualAlpha,
@@ -2460,17 +2520,10 @@ private fun DetailsScrollableContent(
             fallbackCoverUrl = fallbackCoverUrl,
             sharedElementKey = sharedElementKey,
             showWorkActions = isWorkActionEnabled,
-            showCommentsAction = showCommentsAction,
-            showReviewsAction = showReviewsAction,
 
             onInfoCardBoundsSync = onInfoCardBoundsSync,
             onCoverClick = { onActionClick(DetailsAction.OpenCover) },
             onFavoriteClick = onFavoriteClick,
-            onReadingRecordClick = { onActionClick(DetailsAction.OpenReadingRecord) },
-            onCommentsClick = onCommentsClick,
-            onReviewsClick = onReviewsClick,
-            onSelectActiveLocalSource = onSelectActiveLocalSource,
-            onSelectMetadataSource = onSelectMetadataSource,
             onSourceClick = { onActionClick(DetailsAction.OpenSource(it)) },
             onTrackingSourceClick = { option ->
                 option.trackingService?.let { service ->
@@ -2486,6 +2539,9 @@ private fun DetailsScrollableContent(
             onOpenReadingSourceSheet = {
                 if (isWorkActionEnabled) onOpenReadingSourceSheet()
             },
+            onOpenChapters = {
+                if (isWorkActionEnabled) onActionClick(DetailsAction.ToggleList)
+            },
             onOpenSupplementalAction = { action ->
                 onActionClick(DetailsAction.OpenWebUrl(action.url))
             },
@@ -2495,15 +2551,6 @@ private fun DetailsScrollableContent(
                 }
             },
             onTagClick = pendingTagSearch,
-            onTranslateClick = { onActionClick(DetailsAction.Translate) },
-            onTranslateLongClick = {
-                Toast.makeText(
-                    context,
-                    R.string.details_translate_title_and_description_hint,
-                    Toast.LENGTH_SHORT,
-                ).show()
-            },
-            onToggleTranslationClick = { onActionClick(DetailsAction.ToggleTranslation) },
             onOpenLinkedTracking = { linked ->
                 onActionClick(DetailsAction.OpenTrackingDetails(linked.service, linked.remoteId, linked.url))
             },
@@ -2650,6 +2697,8 @@ private fun DetailsPaneContent(
     onPageThumbnailAspectRatioChange: (Float) -> Unit,
     onTogglePageThumbnailsFitPreview: () -> Unit,
     showCollapsedHandle: Boolean,
+    isModernDetailsDockEnabled: Boolean,
+    isModernDockCompact: Boolean,
     onSelectedTabIdChange: (Int) -> Unit,
     onActionClick: (DetailsAction) -> Unit,
     modifier: Modifier = Modifier,
@@ -2657,33 +2706,100 @@ private fun DetailsPaneContent(
     val chapterQuery = detailsPaneState.chapterQuery
     val isChapterSearchVisible = detailsPaneState.isChapterSearchVisible
     val paneOpacityProgress = easedOpacityProgress(sheetExpansionProgress)
-    val actionsExpansionProgress by animateFloatAsState(
-        targetValue = if (isSheetFullyExpanded) 1f else 0f,
-        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-        label = "detailsPaneActionsExpansion",
-    )
-    val statusBarTopPadding = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding()
-    val useCompactPaneSurfaceTint = showCollapsedHandle
-    val paneShape = if (showCollapsedHandle && isSheetFullyExpanded && paneOpacityProgress >= 0.96f) {
-        RoundedCornerShape(0.dp)
+    val modernPanelRevealProgress = if (!showCollapsedHandle) {
+        1f
     } else {
-        RoundedCornerShape(28.dp)
+        ((paneOpacityProgress - 0.04f) / 0.28f).coerceIn(0f, 1f)
     }
+    val density = LocalDensity.current
+    val actionsExpansionProgress = sheetExpansionProgress
+    val statusBarTopPadding = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding()
+    val modernDragHandleRevealProgress = modernDockDragHandleRevealProgress(
+        isModernDockEnabled = isModernDetailsDockEnabled,
+        paneOpacityProgress = paneOpacityProgress,
+    )
+    val modernPanelTopPadding = if (showCollapsedHandle) {
+        modernDockActionsTopPadding(
+            handleTopInset = statusBarTopPadding,
+            paneOpacityProgress = paneOpacityProgress,
+            handleRevealProgress = modernDragHandleRevealProgress,
+        ) + modernDockDragHandleHeight(modernDragHandleRevealProgress) +
+            modernDockDragHandleGap(modernDragHandleRevealProgress) +
+            ModernDetailsDockChromeHeight +
+            ModernDetailsDockExpandedPanelGap
+    } else {
+        76.dp
+    }
+    val useCompactPaneSurfaceTint = showCollapsedHandle
+    val paneShape = RoundedCornerShape(28.dp)
     val paneGlassStyle = if (useCompactPaneSurfaceTint || !showCollapsedHandle) {
         GlassDefaults.prominentStyle()
     } else {
         GlassDefaults.regularStyle()
     }
     val bottomBarGlassPrefs = rememberDetailsBottomBarGlassPrefs()
+    val actionsRow: @Composable (Modifier) -> Unit = { actionsModifier ->
+        DetailsPaneActionsRow(
+            modifier = actionsModifier,
+            detailsPaneState = detailsPaneState,
+            isModernDockEnabled = isModernDetailsDockEnabled,
+            isModernDockCompact = isModernDockCompact,
+            selectedTabId = resolveDetailsTabSelection(selectedTabId, availableTabIds),
+            isSheetFullyExpanded = isSheetFullyExpanded,
+            sheetExpansionProgress = actionsExpansionProgress,
+            isChapterSearchAvailable = isChapterSearchAvailable,
+            isChaptersReversed = isChaptersReversed,
+            isChaptersInGridView = isChaptersInGridView,
+            isHideReadChapters = isHideReadChapters,
+            isMergeRepeatedChapters = isMergeRepeatedChapters,
+            showMergeRepeatedChapters = showMergeRepeatedChapters,
+            isDownloadedOnly = isDownloadedOnly,
+            isDownloadedFilterVisible = isDownloadedFilterVisible,
+            pageGridSizeValue = pageGridSizeValue,
+            pageThumbnailAspectRatio = pageThumbnailAspectRatio,
+            isPageThumbnailsFitPreview = isPageThumbnailsFitPreview,
+            onChapterSearchToggle = onChapterSearchToggle,
+            onToggleChaptersReversed = onToggleChaptersReversed,
+            onToggleChaptersGrid = onToggleChaptersGrid,
+            onToggleHideReadChapters = onToggleHideReadChapters,
+            onToggleMergeRepeatedChapters = onToggleMergeRepeatedChapters,
+            onToggleDownloadedOnly = onToggleDownloadedOnly,
+            onPageGridSizeChange = onPageGridSizeChange,
+            onPageThumbnailAspectRatioChange = onPageThumbnailAspectRatioChange,
+            onTogglePageThumbnailsFitPreview = onTogglePageThumbnailsFitPreview,
+            showCollapsedHandle = showCollapsedHandle,
+            handleTopInset = statusBarTopPadding,
+            contentType = contentType,
+            historyInfo = historyInfo,
+            branches = branches,
+            isLoading = isLoading,
+            onActionClick = onActionClick,
+        )
+    }
     Box(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(modifier),
         contentAlignment = Alignment.TopCenter,
     ) {
         CompositionLocalProvider(LocalGlassPrefs provides bottomBarGlassPrefs) {
             GlassSurface(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .then(modifier),
+                    .fillMaxSize()
+                    .then(
+                        if (isModernDetailsDockEnabled) {
+                            Modifier
+                                .padding(top = modernPanelTopPadding)
+                                .graphicsLayer {
+                                    alpha = modernPanelRevealProgress
+                                    translationY = with(density) {
+                                        (18.dp * (1f - modernPanelRevealProgress)).toPx()
+                                    }
+                                }
+                        } else {
+                            Modifier
+                        },
+                    ),
                 shape = paneShape,
                 style = paneGlassStyle,
                 dialogSurface = true,
@@ -2697,39 +2813,9 @@ private fun DetailsPaneContent(
                         modifier = Modifier
                             .fillMaxWidth(),
                     ) {
-                        DetailsPaneActionsRow(
-                            detailsPaneState = detailsPaneState,
-                            selectedTabId = resolveDetailsTabSelection(selectedTabId, availableTabIds),
-                            isSheetFullyExpanded = isSheetFullyExpanded,
-                            sheetExpansionProgress = actionsExpansionProgress,
-                            isChapterSearchAvailable = isChapterSearchAvailable,
-                            isChaptersReversed = isChaptersReversed,
-                            isChaptersInGridView = isChaptersInGridView,
-                            isHideReadChapters = isHideReadChapters,
-                            isMergeRepeatedChapters = isMergeRepeatedChapters,
-                            showMergeRepeatedChapters = showMergeRepeatedChapters,
-                            isDownloadedOnly = isDownloadedOnly,
-                            isDownloadedFilterVisible = isDownloadedFilterVisible,
-                            pageGridSizeValue = pageGridSizeValue,
-                            pageThumbnailAspectRatio = pageThumbnailAspectRatio,
-                            isPageThumbnailsFitPreview = isPageThumbnailsFitPreview,
-                            onChapterSearchToggle = onChapterSearchToggle,
-                            onToggleChaptersReversed = onToggleChaptersReversed,
-                            onToggleChaptersGrid = onToggleChaptersGrid,
-                            onToggleHideReadChapters = onToggleHideReadChapters,
-                            onToggleMergeRepeatedChapters = onToggleMergeRepeatedChapters,
-                            onToggleDownloadedOnly = onToggleDownloadedOnly,
-                            onPageGridSizeChange = onPageGridSizeChange,
-                            onPageThumbnailAspectRatioChange = onPageThumbnailAspectRatioChange,
-                            onTogglePageThumbnailsFitPreview = onTogglePageThumbnailsFitPreview,
-                            showCollapsedHandle = showCollapsedHandle,
-                            handleTopInset = statusBarTopPadding,
-                            contentType = contentType,
-                            historyInfo = historyInfo,
-                            branches = branches,
-                            isLoading = isLoading,
-                            onActionClick = onActionClick,
-                        )
+                        if (!isModernDetailsDockEnabled) {
+                            actionsRow(Modifier)
+                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2767,6 +2853,43 @@ private fun DetailsPaneContent(
                     }
                 }
             }
+            if (isModernDetailsDockEnabled) {
+                actionsRow(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            horizontal = CompactTopBarHorizontalPadding - DetailsDockContentHorizontalPadding,
+                        )
+                        .graphicsLayer {
+                            scaleY = 0.98f + (0.02f * paneOpacityProgress)
+                        }
+                        .zIndex(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailsDockContainer(
+    modernStyle: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    if (modernStyle) {
+        GlassBottomBarContainer(
+            modifier = modifier
+                .shadow(
+                    elevation = 12.dp,
+                    shape = RoundedCornerShape(32.dp),
+                    clip = false,
+                ),
+        ) {
+            content()
+        }
+    } else {
+        Box(modifier = modifier) {
+            content()
         }
     }
 }
@@ -2775,6 +2898,8 @@ private fun DetailsPaneContent(
 private fun DetailsPaneActionsRow(
     modifier: Modifier = Modifier,
     detailsPaneState: DetailsPaneState,
+    isModernDockEnabled: Boolean,
+    isModernDockCompact: Boolean,
     selectedTabId: Int,
     isSheetFullyExpanded: Boolean,
     sheetExpansionProgress: Float,
@@ -2815,6 +2940,41 @@ private fun DetailsPaneActionsRow(
         contentType != ContentType.HENTAI_NOVEL
     val showBookmarksTab = contentType != ContentType.VIDEO &&
         contentType != ContentType.HENTAI_VIDEO
+    val compactModernDock = isModernDockEnabled && isModernDockCompact
+    val showAllDockTabs = !compactModernDock
+    val modernDragHandleRevealProgress = modernDockDragHandleRevealProgress(
+        isModernDockEnabled = isModernDockEnabled,
+        paneOpacityProgress = paneOpacityProgress,
+    )
+    val shouldShowPaneDragHandle = showCollapsedHandle && modernDragHandleRevealProgress > 0.01f
+    val dragHandleAlpha by animateFloatAsState(
+        targetValue = if (
+            isModernDockEnabled && detailsPaneState.anchor == CompactDetailsPaneAnchor.Collapsed
+        ) {
+            0f
+        } else {
+            lerpFloat(0.68f, 1f, paneOpacityProgress) * modernDragHandleRevealProgress
+        },
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "detailsPaneDragHandleAlpha",
+    )
+    val dockItemEnter = fadeIn(tween(260)) + expandHorizontally(
+        animationSpec = tween(ModernDetailsDockAnimationDurationMillis, easing = FastOutSlowInEasing),
+        expandFrom = Alignment.Start,
+    )
+    val dockItemExit = fadeOut(tween(200)) + shrinkHorizontally(
+        animationSpec = tween(320, easing = FastOutSlowInEasing),
+        shrinkTowards = Alignment.Start,
+    )
+    val modernDockDragModifier = if (isModernDockEnabled) {
+        Modifier.anchoredDraggable(
+            state = detailsPaneState.anchoredState,
+            orientation = Orientation.Vertical,
+            enabled = !detailsPaneState.isGridSizeControlsVisible,
+        )
+    } else {
+        Modifier
+    }
 
     LaunchedEffect(selectedTabId, isSheetFullyExpanded) {
         detailsPaneState.syncTopBarContext(
@@ -2833,32 +2993,82 @@ private fun DetailsPaneActionsRow(
         modifier = Modifier
             .then(modifier)
             .fillMaxWidth()
-            .anchoredDraggable(
-                state = detailsPaneState.anchoredState,
-                orientation = Orientation.Vertical,
-                enabled = detailsPaneState.anchor == CompactDetailsPaneAnchor.Full &&
-                    !detailsPaneState.isGridSizeControlsVisible,
+            .then(
+                if (isModernDockEnabled) {
+                    Modifier
+                } else {
+                    Modifier.anchoredDraggable(
+                        state = detailsPaneState.anchoredState,
+                        orientation = Orientation.Vertical,
+                        enabled = detailsPaneState.anchor == CompactDetailsPaneAnchor.Full &&
+                            !detailsPaneState.isGridSizeControlsVisible,
+                    )
+                },
             )
             .padding(
-                start = 8.dp,
-                end = 8.dp,
-                top = if (showCollapsedHandle) 2.dp else 7.dp,
+                start = DetailsDockContentHorizontalPadding,
+                end = DetailsDockContentHorizontalPadding,
+                top = if (showCollapsedHandle) {
+                    modernDockActionsTopPadding(
+                        handleTopInset = handleTopInset,
+                        paneOpacityProgress = paneOpacityProgress,
+                        handleRevealProgress = modernDragHandleRevealProgress,
+                    )
+                } else {
+                    7.dp
+                },
                 bottom = 2.dp,
             ),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(
+            if (showCollapsedHandle) {
+                modernDockDragHandleGap(modernDragHandleRevealProgress)
+            } else {
+                4.dp
+            },
+        ),
         horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
     ) {
-        if (showCollapsedHandle) {
-            val collapsedHandleHeight = 18.dp
+        if (shouldShowPaneDragHandle) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(collapsedHandleHeight),
+                    .height(modernDockDragHandleHeight(modernDragHandleRevealProgress))
+                    .then(
+                        if (isModernDockEnabled) {
+                            Modifier
+                                .width(64.dp)
+                                .then(
+                                    if (detailsPaneState.anchor == CompactDetailsPaneAnchor.Collapsed) {
+                                        Modifier
+                                    } else {
+                                        Modifier.clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                        ) {
+                                            detailsPaneState.animateTo(
+                                                when (detailsPaneState.anchor) {
+                                                    CompactDetailsPaneAnchor.Collapsed -> CompactDetailsPaneAnchor.Hovered
+                                                    CompactDetailsPaneAnchor.Hovered -> CompactDetailsPaneAnchor.Full
+                                                    CompactDetailsPaneAnchor.Full -> CompactDetailsPaneAnchor.Collapsed
+                                                },
+                                            )
+                                        }
+                                    },
+                                )
+                                .anchoredDraggable(
+                                    state = detailsPaneState.anchoredState,
+                                    orientation = Orientation.Vertical,
+                                    enabled = detailsPaneState.anchor != CompactDetailsPaneAnchor.Collapsed &&
+                                        !detailsPaneState.isGridSizeControlsVisible,
+                                )
+                        } else {
+                            Modifier.fillMaxWidth()
+                        },
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 DetailsPaneDragHandle(
                     modifier = Modifier
-                        .alpha(lerpFloat(0.68f, 1f, paneOpacityProgress)),
+                        .alpha(dragHandleAlpha),
                 )
             }
         }
@@ -2866,6 +3076,7 @@ private fun DetailsPaneActionsRow(
             DetailsPaneTopBarMode.ChapterSelection -> {
                 ChapterSelectionTopBar(
                     state = chapterSelectionState ?: return@Column,
+                    modernStyle = isModernDockEnabled,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 return@Column
@@ -2888,156 +3099,246 @@ private fun DetailsPaneActionsRow(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = {},
+                .then(
+                    if (isModernDockEnabled) {
+                        Modifier
+                    } else {
+                        Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                        )
+                    },
                 ),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 2.dp),
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                DetailsDockActionButton(
-                    iconRes = R.drawable.ic_list,
-                    contentDescription = stringResource(R.string.chapters),
-                    isSelected = selectedTabId == DETAILS_TAB_CHAPTERS,
-                    onClick = { onActionClick(DetailsAction.ToggleList) },
+                val visibleDockTabCount = 1 +
+                    (if (showPagesTab) 1 else 0) +
+                    (if (showBookmarksTab) 1 else 0)
+                val tabSlotWidth = if (isModernDockEnabled) ModernDetailsDockTabSlotWidth else 52.dp
+                val tabsDockPadding = if (isModernDockEnabled) 12.dp else 4.dp
+                val dockGap = if (isModernDockEnabled) 8.dp else 4.dp
+                val expandedTabsDockWidth = tabsDockPadding + (tabSlotWidth * visibleDockTabCount)
+                val expandedPrimaryDockWidth = (maxWidth - expandedTabsDockWidth - dockGap)
+                    .coerceAtLeast(ModernDetailsDockCompactPrimaryWidth)
+                val isExpandedTools = topBarMode == DetailsPaneTopBarMode.ExpandedChapterTools ||
+                    topBarMode == DetailsPaneTopBarMode.ExpandedGridTools
+                val primaryDockWidth by animateDpAsState(
+                    targetValue = when {
+                        compactModernDock -> ModernDetailsDockCompactPrimaryWidth
+                        isModernDockEnabled && isExpandedTools -> ModernDetailsDockToolsWidth
+                        else -> expandedPrimaryDockWidth
+                    },
+                    animationSpec = tween(
+                        durationMillis = ModernDetailsDockAnimationDurationMillis,
+                        easing = FastOutSlowInEasing,
+                    ),
+                    label = "detailsPrimaryDockWidth",
                 )
-                if (showPagesTab) {
-                    DetailsDockActionButton(
-                        iconRes = R.drawable.ic_grid,
-                        contentDescription = stringResource(R.string.pages),
-                        isSelected = selectedTabId == DETAILS_TAB_PAGES,
-                        onClick = { onActionClick(DetailsAction.ToggleGrid) },
-                    )
-                }
-                if (showBookmarksTab) {
-                    DetailsDockActionButton(
-                        iconRes = R.drawable.ic_bookmark,
-                        contentDescription = stringResource(R.string.bookmarks),
-                        isSelected = selectedTabId == DETAILS_TAB_BOOKMARKS,
-                        onClick = { onActionClick(DetailsAction.ToggleBookmarkView) },
-                    )
-                }
-                Spacer(modifier = Modifier.width(4.dp))
-                when (topBarMode) {
-                    DetailsPaneTopBarMode.ExpandedChapterTools -> {
-                        if (showCollapsedHandle) {
-                            ExpandedPaneUtilityDock(
-                                modifier = Modifier.weight(1f),
-                                sheetExpansionProgress = paneOpacityProgress,
-                                isSearchEnabled = isChapterSearchAvailable,
-                                isSearchActive = isChapterSearchVisible,
-                                isChaptersReversed = isChaptersReversed,
-                                isChaptersInGridView = isChaptersInGridView,
-                                isHideReadChapters = isHideReadChapters,
-                                isMergeRepeatedChapters = isMergeRepeatedChapters,
-                                showMergeRepeatedChapters = showMergeRepeatedChapters,
-                                isDownloadedOnly = isDownloadedOnly,
-                                isDownloadedFilterVisible = isDownloadedFilterVisible,
-                                onSearchClick = onChapterSearchToggle,
-                                onToggleChaptersReversed = onToggleChaptersReversed,
-                                onToggleChaptersGrid = onToggleChaptersGrid,
-                                onToggleHideReadChapters = onToggleHideReadChapters,
-                                onToggleMergeRepeatedChapters = onToggleMergeRepeatedChapters,
-                                onToggleDownloadedOnly = onToggleDownloadedOnly,
-                                onShowGridSizeControls = detailsPaneState::showGridSizeControls,
-                            )
-                        } else {
-                            ReadDock(
-                                modifier = Modifier.weight(0.64f),
-                                readLabel = resolveReadActionLabel(
-                                    contentType = contentType,
-                                    historyInfo = historyInfo,
-                                    isLoading = isLoading,
-                                ),
-                                branches = branches,
-                                historyInfo = historyInfo,
-                                isDownloadAvailable = historyInfo.canDownload,
-                                isEnabled = !isLoading && historyInfo.isValid,
-                                isMergeRepeatedChapters = isMergeRepeatedChapters,
-                                showMergeRepeatedChapters = showMergeRepeatedChapters,
-                                onToggleMergeRepeatedChapters = onToggleMergeRepeatedChapters,
-                                onReadClick = { onActionClick(DetailsAction.Resume) },
-                                onIncognitoClick = { onActionClick(DetailsAction.ResumeIncognito) },
-                                onForgetClick = { onActionClick(DetailsAction.ForgetHistory) },
-                                onDownloadClick = { onActionClick(DetailsAction.Download) },
-                                onBranchSelected = { onActionClick(DetailsAction.SelectBranch(it)) },
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            ExpandedPaneUtilityDock(
-                                modifier = Modifier.weight(0.36f),
-                                sheetExpansionProgress = paneOpacityProgress,
-                                isSearchEnabled = isChapterSearchAvailable,
-                                isSearchActive = isChapterSearchVisible,
-                                isChaptersReversed = isChaptersReversed,
-                                isChaptersInGridView = isChaptersInGridView,
-                                isHideReadChapters = isHideReadChapters,
-                                isMergeRepeatedChapters = isMergeRepeatedChapters,
-                                showMergeRepeatedChapters = showMergeRepeatedChapters,
-                                isDownloadedOnly = isDownloadedOnly,
-                                isDownloadedFilterVisible = isDownloadedFilterVisible,
-                                onSearchClick = onChapterSearchToggle,
-                                onToggleChaptersReversed = onToggleChaptersReversed,
-                                onToggleChaptersGrid = onToggleChaptersGrid,
-                                onToggleHideReadChapters = onToggleHideReadChapters,
-                                onToggleMergeRepeatedChapters = onToggleMergeRepeatedChapters,
-                                onToggleDownloadedOnly = onToggleDownloadedOnly,
-                                onShowGridSizeControls = detailsPaneState::showGridSizeControls,
-                            )
-                        }
-                    }
 
-                    DetailsPaneTopBarMode.ExpandedGridTools -> {
-                        Spacer(modifier = Modifier.weight(1f))
-                        DetailsChromeButton(
-                            onClick = onTogglePageThumbnailsFitPreview,
+                DetailsDockContainer(
+                    modernStyle = isModernDockEnabled,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .then(modernDockDragModifier),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(
+                            horizontal = if (isModernDockEnabled) 5.dp else 2.dp,
+                            vertical = if (isModernDockEnabled) 5.dp else 0.dp,
+                        ),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        AnimatedVisibility(
+                            visible = showAllDockTabs || selectedTabId == DETAILS_TAB_CHAPTERS,
+                            enter = dockItemEnter,
+                            exit = dockItemExit,
                         ) {
-                            Icon(
-                                painter = rememberSafePainter(R.drawable.ic_aspect_ratio),
-                                contentDescription = stringResource(R.string.fit_page_thumbnails),
-                                tint = if (isPageThumbnailsFitPreview) {
-                                    MaterialTheme.colorScheme.primary
+                            DetailsDockActionButton(
+                                iconRes = R.drawable.ic_list,
+                                contentDescription = stringResource(R.string.chapters),
+                                isSelected = selectedTabId == DETAILS_TAB_CHAPTERS,
+                                modernStyle = isModernDockEnabled,
+                                spacingAfter = if (isModernDockEnabled && showAllDockTabs && (showPagesTab || showBookmarksTab)) {
+                                    2.dp
                                 } else {
-                                    MaterialTheme.colorScheme.onSurface
+                                    0.dp
                                 },
+                                onClick = { onActionClick(DetailsAction.ToggleList) },
                             )
                         }
-                        DetailsChromeButton(
-                            onClick = detailsPaneState::showGridSizeControls,
+                        AnimatedVisibility(
+                            visible = showPagesTab && (showAllDockTabs || selectedTabId == DETAILS_TAB_PAGES),
+                            enter = dockItemEnter,
+                            exit = dockItemExit,
                         ) {
-                            Icon(
-                                painter = rememberSafePainter(R.drawable.ic_size_large),
-                                contentDescription = stringResource(R.string.grid_size),
-                                tint = MaterialTheme.colorScheme.onSurface,
+                            DetailsDockActionButton(
+                                iconRes = R.drawable.ic_grid,
+                                contentDescription = stringResource(R.string.pages),
+                                isSelected = selectedTabId == DETAILS_TAB_PAGES,
+                                modernStyle = isModernDockEnabled,
+                                spacingAfter = if (isModernDockEnabled && showAllDockTabs && showBookmarksTab) {
+                                    2.dp
+                                } else {
+                                    0.dp
+                                },
+                                onClick = { onActionClick(DetailsAction.ToggleGrid) },
+                            )
+                        }
+                        AnimatedVisibility(
+                            visible = showBookmarksTab && (showAllDockTabs || selectedTabId == DETAILS_TAB_BOOKMARKS),
+                            enter = dockItemEnter,
+                            exit = dockItemExit,
+                        ) {
+                            DetailsDockActionButton(
+                                iconRes = R.drawable.ic_bookmark,
+                                contentDescription = stringResource(R.string.bookmarks),
+                                isSelected = selectedTabId == DETAILS_TAB_BOOKMARKS,
+                                modernStyle = isModernDockEnabled,
+                                spacingAfter = 0.dp,
+                                onClick = { onActionClick(DetailsAction.ToggleBookmarkView) },
                             )
                         }
                     }
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .then(modernDockDragModifier)
+                        .width(primaryDockWidth),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        when (topBarMode) {
+                            DetailsPaneTopBarMode.ExpandedChapterTools -> {
+                                if (showCollapsedHandle) {
+                                    ExpandedPaneUtilityDock(
+                                        modifier = Modifier.weight(1f),
+                                        modernStyle = isModernDockEnabled,
+                                        sheetExpansionProgress = paneOpacityProgress,
+                                        isSearchEnabled = isChapterSearchAvailable,
+                                        isSearchActive = isChapterSearchVisible,
+                                        isChaptersReversed = isChaptersReversed,
+                                        isChaptersInGridView = isChaptersInGridView,
+                                        isHideReadChapters = isHideReadChapters,
+                                        isMergeRepeatedChapters = isMergeRepeatedChapters,
+                                        showMergeRepeatedChapters = showMergeRepeatedChapters,
+                                        isDownloadedOnly = isDownloadedOnly,
+                                        isDownloadedFilterVisible = isDownloadedFilterVisible,
+                                        onSearchClick = onChapterSearchToggle,
+                                        onToggleChaptersReversed = onToggleChaptersReversed,
+                                        onToggleChaptersGrid = onToggleChaptersGrid,
+                                        onToggleHideReadChapters = onToggleHideReadChapters,
+                                        onToggleMergeRepeatedChapters = onToggleMergeRepeatedChapters,
+                                        onToggleDownloadedOnly = onToggleDownloadedOnly,
+                                        onShowGridSizeControls = detailsPaneState::showGridSizeControls,
+                                    )
+                                } else {
+                                    ReadDock(
+                                        modifier = Modifier.weight(0.64f),
+                                        modernStyle = isModernDockEnabled,
+                                        compact = compactModernDock,
+                                        readLabel = resolveReadActionLabel(
+                                            contentType = contentType,
+                                            historyInfo = historyInfo,
+                                            isLoading = isLoading,
+                                        ),
+                                        contentType = contentType,
+                                        branches = branches,
+                                        historyInfo = historyInfo,
+                                        isDownloadAvailable = historyInfo.canDownload,
+                                        isEnabled = !isLoading && historyInfo.isValid,
+                                        isMergeRepeatedChapters = isMergeRepeatedChapters,
+                                        showMergeRepeatedChapters = showMergeRepeatedChapters,
+                                        onToggleMergeRepeatedChapters = onToggleMergeRepeatedChapters,
+                                        onReadClick = { onActionClick(DetailsAction.Resume) },
+                                        onIncognitoClick = { onActionClick(DetailsAction.ResumeIncognito) },
+                                        onForgetClick = { onActionClick(DetailsAction.ForgetHistory) },
+                                        onDownloadClick = { onActionClick(DetailsAction.Download) },
+                                        onBranchSelected = { onActionClick(DetailsAction.SelectBranch(it)) },
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    ExpandedPaneUtilityDock(
+                                        modifier = Modifier.weight(0.36f),
+                                        modernStyle = isModernDockEnabled,
+                                        sheetExpansionProgress = paneOpacityProgress,
+                                        isSearchEnabled = isChapterSearchAvailable,
+                                        isSearchActive = isChapterSearchVisible,
+                                        isChaptersReversed = isChaptersReversed,
+                                        isChaptersInGridView = isChaptersInGridView,
+                                        isHideReadChapters = isHideReadChapters,
+                                        isMergeRepeatedChapters = isMergeRepeatedChapters,
+                                        showMergeRepeatedChapters = showMergeRepeatedChapters,
+                                        isDownloadedOnly = isDownloadedOnly,
+                                        isDownloadedFilterVisible = isDownloadedFilterVisible,
+                                        onSearchClick = onChapterSearchToggle,
+                                        onToggleChaptersReversed = onToggleChaptersReversed,
+                                        onToggleChaptersGrid = onToggleChaptersGrid,
+                                        onToggleHideReadChapters = onToggleHideReadChapters,
+                                        onToggleMergeRepeatedChapters = onToggleMergeRepeatedChapters,
+                                        onToggleDownloadedOnly = onToggleDownloadedOnly,
+                                        onShowGridSizeControls = detailsPaneState::showGridSizeControls,
+                                    )
+                                }
+                            }
 
-                    else -> {
-                        ReadDock(
-                            modifier = Modifier.weight(1f),
-                            readLabel = resolveReadActionLabel(
-                                contentType = contentType,
-                                historyInfo = historyInfo,
-                                isLoading = isLoading,
-                            ),
-                            branches = branches,
-                            historyInfo = historyInfo,
-                            isDownloadAvailable = historyInfo.canDownload,
-                            isEnabled = !isLoading && historyInfo.isValid,
-                            isMergeRepeatedChapters = isMergeRepeatedChapters,
-                            showMergeRepeatedChapters = showMergeRepeatedChapters,
-                            onToggleMergeRepeatedChapters = onToggleMergeRepeatedChapters,
-                            onReadClick = { onActionClick(DetailsAction.Resume) },
-                            onIncognitoClick = { onActionClick(DetailsAction.ResumeIncognito) },
-                            onForgetClick = { onActionClick(DetailsAction.ForgetHistory) },
-                            onDownloadClick = { onActionClick(DetailsAction.Download) },
-                            onBranchSelected = { onActionClick(DetailsAction.SelectBranch(it)) },
-                        )
+                            DetailsPaneTopBarMode.ExpandedGridTools -> {
+                                Spacer(modifier = Modifier.weight(1f))
+                                DetailsChromeButton(
+                                    onClick = onTogglePageThumbnailsFitPreview,
+                                ) {
+                                    Icon(
+                                        painter = rememberSafePainter(R.drawable.ic_aspect_ratio),
+                                        contentDescription = stringResource(R.string.fit_page_thumbnails),
+                                        tint = if (isPageThumbnailsFitPreview) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                    )
+                                }
+                                DetailsChromeButton(
+                                    onClick = detailsPaneState::showGridSizeControls,
+                                ) {
+                                    Icon(
+                                        painter = rememberSafePainter(R.drawable.ic_size_large),
+                                        contentDescription = stringResource(R.string.grid_size),
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+
+                            else -> {
+                                ReadDock(
+                                    modifier = Modifier.weight(1f),
+                                    modernStyle = isModernDockEnabled,
+                                    compact = compactModernDock,
+                                    readLabel = resolveReadActionLabel(
+                                        contentType = contentType,
+                                        historyInfo = historyInfo,
+                                        isLoading = isLoading,
+                                    ),
+                                    contentType = contentType,
+                                    branches = branches,
+                                    historyInfo = historyInfo,
+                                    isDownloadAvailable = historyInfo.canDownload,
+                                    isEnabled = !isLoading && historyInfo.isValid,
+                                    isMergeRepeatedChapters = isMergeRepeatedChapters,
+                                    showMergeRepeatedChapters = showMergeRepeatedChapters,
+                                    onToggleMergeRepeatedChapters = onToggleMergeRepeatedChapters,
+                                    onReadClick = { onActionClick(DetailsAction.Resume) },
+                                    onIncognitoClick = { onActionClick(DetailsAction.ResumeIncognito) },
+                                    onForgetClick = { onActionClick(DetailsAction.ForgetHistory) },
+                                    onDownloadClick = { onActionClick(DetailsAction.Download) },
+                                    onBranchSelected = { onActionClick(DetailsAction.SelectBranch(it)) },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -3060,74 +3361,106 @@ private fun DetailsPaneDragHandle(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChapterSelectionTopBar(
     state: ChapterSelectionUiState,
+    modernStyle: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    TopAppBar(
-        title = {
-            Text(text = state.selectedCount.toString())
-        },
-        navigationIcon = {
-            IconButton(onClick = state.onClearSelection) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = stringResource(R.string.close),
-                )
-            }
-        },
-        actions = {
-            if (state.canSelectAll) {
-                IconButton(onClick = state.onSelectAll) {
+    Row(
+        modifier = modifier.height(ModernDetailsDockChromeHeight),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DetailsDockContainer(modernStyle = modernStyle) {
+                IconButton(
+                    onClick = state.onClearSelection,
+                    modifier = Modifier.size(ModernDetailsDockChromeHeight),
+                ) {
                     Icon(
-                        painter = rememberSafePainter(R.drawable.ic_select_all),
-                        contentDescription = stringResource(android.R.string.selectAll),
+                        imageVector = Icons.Default.Close,
+                        contentDescription = stringResource(R.string.close),
                     )
                 }
             }
-            if (state.canDownload) {
-                IconButton(onClick = state.onDownload) {
-                    Icon(
-                        painter = rememberSafePainter(R.drawable.ic_download),
-                        contentDescription = stringResource(R.string.download),
-                    )
+            Text(
+                text = state.selectedCount.toString(),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        DetailsDockContainer(
+            modernStyle = modernStyle,
+            modifier = Modifier.weight(1f, fill = false),
+        ) {
+            Row(
+                modifier = Modifier
+                    .height(ModernDetailsDockChromeHeight)
+                    .padding(horizontal = 5.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (state.canSelectAll) {
+                    ChapterSelectionActionButton(onClick = state.onSelectAll) {
+                        Icon(
+                            painter = rememberSafePainter(R.drawable.ic_select_all),
+                            contentDescription = stringResource(android.R.string.selectAll),
+                        )
+                    }
+                }
+                if (state.canDownload) {
+                    ChapterSelectionActionButton(onClick = state.onDownload) {
+                        Icon(
+                            painter = rememberSafePainter(R.drawable.ic_download),
+                            contentDescription = stringResource(R.string.download),
+                        )
+                    }
+                }
+                if (state.canDelete) {
+                    ChapterSelectionActionButton(onClick = state.onDelete) {
+                        Icon(
+                            painter = rememberSafePainter(R.drawable.ic_delete),
+                            contentDescription = stringResource(R.string.delete),
+                        )
+                    }
+                }
+                if (state.canBookmark) {
+                    ChapterSelectionActionButton(onClick = state.onBookmark) {
+                        Icon(
+                            painter = rememberSafePainter(R.drawable.ic_bookmark),
+                            contentDescription = stringResource(R.string.bookmarks),
+                        )
+                    }
+                }
+                if (state.canMarkCurrent) {
+                    ChapterSelectionActionButton(onClick = state.onMarkCurrent) {
+                        Icon(
+                            painter = rememberSafePainter(R.drawable.ic_current_chapter),
+                            contentDescription = stringResource(R.string.mark_as_current),
+                        )
+                    }
                 }
             }
-            if (state.canDelete) {
-                IconButton(onClick = state.onDelete) {
-                    Icon(
-                        painter = rememberSafePainter(R.drawable.ic_delete),
-                        contentDescription = stringResource(R.string.delete),
-                    )
-                }
-            }
-            if (state.canBookmark) {
-                IconButton(onClick = state.onBookmark) {
-                    Icon(
-                        painter = rememberSafePainter(R.drawable.ic_bookmark),
-                        contentDescription = stringResource(R.string.bookmarks),
-                    )
-                }
-            }
-            if (state.canMarkCurrent) {
-                IconButton(onClick = state.onMarkCurrent) {
-                    Icon(
-                        painter = rememberSafePainter(R.drawable.ic_current_chapter),
-                        contentDescription = stringResource(R.string.mark_as_current),
-                    )
-                }
-            }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color.Transparent,
-            titleContentColor = MaterialTheme.colorScheme.onSurface,
-            navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-            actionIconContentColor = MaterialTheme.colorScheme.onSurface,
-        ),
-        modifier = modifier,
-    )
+        }
+    }
+}
+
+@Composable
+private fun ChapterSelectionActionButton(
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.size(42.dp),
+    ) {
+        content()
+    }
 }
 
 @Composable
@@ -3144,11 +3477,23 @@ private fun PageGridSizeControlsRow(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBackClick) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.back),
-            )
+        Surface(
+            modifier = Modifier.padding(start = 4.dp, end = 6.dp),
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.96f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
+            ),
+        ) {
+            IconButton(onClick = onBackClick) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.back),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
         Column(
             modifier = Modifier
@@ -3188,7 +3533,7 @@ private fun LabeledGridSlider(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Slider(
+        KototoroSlider(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
@@ -3200,6 +3545,7 @@ private fun LabeledGridSlider(
 @Composable
 private fun ExpandedPaneUtilityDock(
     modifier: Modifier = Modifier,
+    modernStyle: Boolean,
     sheetExpansionProgress: Float,
     isSearchEnabled: Boolean,
     isSearchActive: Boolean,
@@ -3220,13 +3566,15 @@ private fun ExpandedPaneUtilityDock(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    Row(
+    DetailsDockContainer(
+        modernStyle = modernStyle,
         modifier = modifier,
-        horizontalArrangement = Arrangement.End,
-        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
     ) {
         Row(
-            modifier = Modifier.height(52.dp).padding(horizontal = 4.dp),
+            modifier = Modifier
+                .height(ModernDetailsDockChromeHeight)
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
         ) {
             IconButton(
@@ -3364,12 +3712,33 @@ internal fun DetailsDockActionButton(
     iconRes: Int,
     contentDescription: String,
     isSelected: Boolean,
+    modernStyle: Boolean = false,
+    spacingAfter: androidx.compose.ui.unit.Dp = if (modernStyle) 0.dp else 4.dp,
     onClick: () -> Unit,
 ) {
+    val containerColor by animateColorAsState(
+        targetValue = if (modernStyle && isSelected) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
+        } else {
+            Color.Transparent
+        },
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "detailsDockSelectionColor",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = when {
+            modernStyle && isSelected -> MaterialTheme.colorScheme.onPrimaryContainer
+            modernStyle -> MaterialTheme.colorScheme.onSurfaceVariant
+            isSelected -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.onSurface
+        },
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "detailsDockSelectionContentColor",
+    )
     Surface(
-        modifier = Modifier.padding(end = 4.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = Color.Transparent,
+        modifier = Modifier.padding(end = spacingAfter),
+        shape = RoundedCornerShape(if (modernStyle) 18.dp else 16.dp),
+        color = containerColor,
         tonalElevation = 0.dp,
     ) {
         IconButton(
@@ -3381,11 +3750,7 @@ internal fun DetailsDockActionButton(
             Icon(
                 painter = rememberSafePainter(iconRes),
                 contentDescription = contentDescription,
-                tint = if (isSelected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
+                tint = contentColor,
             )
         }
     }
@@ -3494,7 +3859,10 @@ private data class BrowserTarget(
 @Composable
 private fun ReadDock(
     modifier: Modifier = Modifier,
+    modernStyle: Boolean = false,
+    compact: Boolean = false,
     readLabel: String,
+    contentType: ContentType?,
     branches: List<ContentBranch>,
     historyInfo: HistoryInfo,
     isDownloadAvailable: Boolean,
@@ -3516,7 +3884,22 @@ private fun ReadDock(
     val hasMenuActions = hasQuickActions || hasBranchOptions
 
     val shapeRadiusPercent by androidx.compose.animation.core.animateIntAsState(targetValue = if (expanded) 50 else 0)
-    val optionGap by androidx.compose.animation.core.animateDpAsState(targetValue = if (expanded) 8.dp else 2.dp)
+    val optionGap by androidx.compose.animation.core.animateDpAsState(
+        targetValue = when {
+            expanded -> 8.dp
+            modernStyle -> 0.dp
+            else -> 2.dp
+        },
+    )
+    val dividerAlpha by animateFloatAsState(
+        targetValue = if (modernStyle && !expanded) 0.22f else 0f,
+        animationSpec = tween(durationMillis = 180),
+        label = "readDockDividerAlpha",
+    )
+    val actionIconRes = when (contentType) {
+        ContentType.VIDEO, ContentType.HENTAI_VIDEO -> R.drawable.ic_play
+        else -> R.drawable.ic_read
+    }
     val readButtonShape = androidx.compose.foundation.shape.RoundedCornerShape(
         topStartPercent = 50,
         bottomStartPercent = 50,
@@ -3532,8 +3915,10 @@ private fun ReadDock(
 
     Row(
         modifier = modifier
-            .height(50.dp)
-            .padding(horizontal = 4.dp, vertical = 4.dp),
+            .height(if (modernStyle) 52.dp else 50.dp)
+            .padding(
+                all = if (modernStyle) 0.dp else 4.dp,
+            ),
         horizontalArrangement = Arrangement.spacedBy(optionGap),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -3542,40 +3927,91 @@ private fun ReadDock(
                 .weight(1f)
                 .fillMaxHeight(),
             shape = readButtonShape,
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f),
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            color = if (modernStyle) {
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.96f)
+            } else {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f)
+            },
+            contentColor = if (modernStyle) {
+                MaterialTheme.colorScheme.onPrimary
+            } else {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            },
             tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
+            shadowElevation = if (modernStyle) 4.dp else 0.dp,
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(readButtonShape)
                     .clickable(enabled = isEnabled, onClick = onReadClick)
-                    .padding(horizontal = 14.dp),
+                    .padding(horizontal = if (modernStyle) 6.dp else 14.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    text = readLabel,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (modernStyle) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Icon(
+                            painter = rememberSafePainter(actionIconRes),
+                            contentDescription = if (compact) readLabel else null,
+                            modifier = Modifier.size(22.dp),
+                        )
+                        AnimatedVisibility(
+                            visible = !compact,
+                            enter = fadeIn(tween(260)) + expandHorizontally(
+                                animationSpec = tween(
+                                    ModernDetailsDockAnimationDurationMillis,
+                                    easing = FastOutSlowInEasing,
+                                ),
+                                expandFrom = Alignment.Start,
+                            ),
+                            exit = fadeOut(tween(200)) + shrinkHorizontally(
+                                animationSpec = tween(320, easing = FastOutSlowInEasing),
+                                shrinkTowards = Alignment.Start,
+                            ),
+                        ) {
+                            Text(
+                                text = readLabel,
+                                modifier = Modifier.padding(start = 8.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = readLabel,
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
 
         Box(
             modifier = Modifier
-                .width(50.dp)
+                .width(if (modernStyle) ModernDetailsDockMoreButtonWidth else 50.dp)
                 .fillMaxHeight(),
         ) {
             Surface(
                 modifier = Modifier.fillMaxSize(),
                 shape = trailingButtonShape,
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f),
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                color = if (modernStyle) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.96f)
+                } else {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f)
+                },
+                contentColor = if (modernStyle) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                },
                 tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
+                shadowElevation = if (modernStyle) 4.dp else 0.dp,
             ) {
                 Box(
                     modifier = Modifier
@@ -3584,6 +4020,15 @@ private fun ReadDock(
                         .clickable(enabled = hasMenuActions, onClick = { expanded = true }),
                     contentAlignment = Alignment.Center,
                 ) {
+                    if (modernStyle) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterStart)
+                                .width(1.dp)
+                                .height(24.dp)
+                                .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = dividerAlpha)),
+                        )
+                    }
                     Icon(
                         imageVector = Icons.Default.KeyboardArrowDown,
                         contentDescription = if (hasBranchOptions) {
@@ -3678,6 +4123,45 @@ private fun ReadDock(
 
 private fun lerpFloat(start: Float, stop: Float, fraction: Float): Float {
     return start + (stop - start) * fraction.coerceIn(0f, 1f)
+}
+
+private fun lerpDp(
+    start: androidx.compose.ui.unit.Dp,
+    stop: androidx.compose.ui.unit.Dp,
+    fraction: Float,
+): androidx.compose.ui.unit.Dp {
+    return start + ((stop - start) * fraction.coerceIn(0f, 1f))
+}
+
+private fun modernDockDragHandleRevealProgress(
+    isModernDockEnabled: Boolean,
+    paneOpacityProgress: Float,
+): Float {
+    return if (isModernDockEnabled) {
+        ((1f - paneOpacityProgress) / 0.32f).coerceIn(0f, 1f)
+    } else {
+        1f
+    }
+}
+
+private fun modernDockActionsTopPadding(
+    handleTopInset: androidx.compose.ui.unit.Dp,
+    paneOpacityProgress: Float,
+    handleRevealProgress: Float,
+): androidx.compose.ui.unit.Dp {
+    return lerpDp(
+        start = handleTopInset,
+        stop = 2.dp + (handleTopInset * paneOpacityProgress),
+        fraction = handleRevealProgress,
+    )
+}
+
+private fun modernDockDragHandleHeight(revealProgress: Float): androidx.compose.ui.unit.Dp {
+    return 18.dp * revealProgress.coerceIn(0f, 1f)
+}
+
+private fun modernDockDragHandleGap(revealProgress: Float): androidx.compose.ui.unit.Dp {
+    return 4.dp * revealProgress.coerceIn(0f, 1f)
 }
 
 @Composable
@@ -4222,6 +4706,7 @@ private fun DetailsOverflowMenu(
     hasLocalBrowserTarget: Boolean,
     localBrowserTitleRes: Int,
     hasOnlineVariant: Boolean,
+    isReadingRecordAvailable: Boolean,
     isDeleteLocalAvailable: Boolean,
     isEditOverrideAvailable: Boolean,
     isShortcutSupported: Boolean,
@@ -4257,7 +4742,7 @@ private fun DetailsOverflowMenu(
                                 } else if (hasTranslationCache) {
                                     R.string.details_show_translation
                                 } else {
-                                    R.string.translate_title
+                                    R.string.details_translate_title_and_description_hint
                                 },
                             ),
                         )
@@ -4272,6 +4757,15 @@ private fun DetailsOverflowMenu(
                                 DetailsAction.Translate
                             },
                         )
+                    },
+                )
+            }
+            if (isReadingRecordAvailable) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.reading_record)) },
+                    onClick = {
+                        expanded = false
+                        onActionClick(DetailsAction.OpenReadingRecord)
                     },
                 )
             }

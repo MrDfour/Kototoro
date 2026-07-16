@@ -9,6 +9,7 @@ import org.skepsun.kototoro.core.cache.MemoryContentCache
 import org.skepsun.kototoro.core.exceptions.CloudFlareException
 import org.skepsun.kototoro.core.exceptions.InteractiveActionRequiredException
 import org.skepsun.kototoro.core.parser.CachingContentRepository
+import org.skepsun.kototoro.core.parser.RelatedContentSearchFallback
 import org.skepsun.kototoro.mihon.compat.MihonRequestContext
 import org.skepsun.kototoro.mihon.model.MihonMangaSource
 import org.skepsun.kototoro.mihon.model.getPublicContentUrl
@@ -187,7 +188,7 @@ class MihonMangaRepository(
         val chapters = rawChapters.asReversed()
             .mapIndexed { index, sChapter ->
                 // 如果插件有提供合法的编号则保留，否则使用我们在反转列表中的索引位置。
-                val chapterNumber = if (sChapter.chapter_number > 0) {
+                val chapterNumber = if (sChapter.chapter_number >= 0) {
                     sChapter.chapter_number
                 } else {
                     (index + 1).toFloat()
@@ -425,5 +426,13 @@ class MihonMangaRepository(
         return MihonRequestContext.withSource(source, block)
     }
     
-    override suspend fun getRelatedContentImpl(seed: Content): List<Content> = emptyList()
+    override suspend fun getRelatedContentImpl(seed: Content): List<Content> {
+        return RelatedContentSearchFallback.find(seed) { query ->
+            getList(
+                offset = 0,
+                order = defaultSortOrder,
+                filter = ContentListFilter(query = query),
+            )
+        }
+    }
 }

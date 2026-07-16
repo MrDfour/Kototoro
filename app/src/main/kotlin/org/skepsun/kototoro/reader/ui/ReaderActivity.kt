@@ -49,6 +49,7 @@ import org.skepsun.kototoro.core.exceptions.resolve.SnackbarErrorObserver
 import org.skepsun.kototoro.core.nav.AppRouter
 import org.skepsun.kototoro.core.nav.router
 import org.skepsun.kototoro.core.prefs.AppSettings
+import org.skepsun.kototoro.core.util.FoldableUtils
 import org.skepsun.kototoro.core.prefs.SourceSettings
 import org.skepsun.kototoro.core.util.ext.findCloudFlareException
 import org.skepsun.kototoro.core.prefs.ReaderMode
@@ -65,6 +66,7 @@ import org.skepsun.kototoro.core.util.ext.observe
 import org.skepsun.kototoro.core.util.ext.observeEvent
 import org.skepsun.kototoro.core.prefs.observeAsFlow
 import org.skepsun.kototoro.core.util.ext.postDelayed
+import org.skepsun.kototoro.core.util.ext.performConfirmHapticFeedback
 import org.skepsun.kototoro.core.util.ext.toUriOrNull
 import org.skepsun.kototoro.core.util.ext.zipWithPrevious
 import org.skepsun.kototoro.databinding.ActivityReaderBinding
@@ -127,6 +129,8 @@ class ReaderActivity :
     private var currentTranslationLayerState: TranslationLayerState = TranslationLayerState.IDLE
     private var lastMangaTranslationProgress: ReaderViewModel.ChapterTranslationProgress? = null
     private var lastMangaTranslationToastAtMs: Long = 0L
+    private var translationShortcutVisibleForSession = false
+    private var enableTranslationAfterSetup = false
 
     // Tracks whether the foldable device is in an unfolded state (half-opened or flat)
     private var isFoldUnfolded: Boolean = false
@@ -141,6 +145,13 @@ class ReaderActivity :
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) {
             resetTranslationSession()
+        } else {
+            translationShortcutVisibleForSession = savedInstanceState.getBoolean(
+                STATE_TRANSLATION_SHORTCUT_VISIBLE,
+            )
+            enableTranslationAfterSetup = savedInstanceState.getBoolean(
+                STATE_ENABLE_TRANSLATION_AFTER_SETUP,
+            )
         }
         setContentView(ActivityReaderBinding.inflate(layoutInflater))
         readerManager = ReaderManager(supportFragmentManager, viewBinding.container, settings)
@@ -152,6 +163,7 @@ class ReaderActivity :
         viewBinding.zoomControl.listener = this
         viewBinding.actionsView.listener = this
         viewBinding.actionsView.setTranslateButtonVisible(viewModel.shouldShowTranslationToggle())
+        viewBinding.actionsView.setTranslateButtonContextualVisible(translationShortcutVisibleForSession)
         viewBinding.buttonTimer?.setOnClickListener(this)
         idlingDetector.bindToLifecycle(this)
         screenOrientationHelper.applySettings()
@@ -162,7 +174,7 @@ class ReaderActivity :
         }
         viewBinding.timerControl.onVisibilityChangeListener = this
         viewBinding.timerControl.attach(scrollTimer, this)
-        if (resources.getBoolean(R.bool.is_tablet)) {
+        if (FoldableUtils.shouldUseTabletLayout(this, settings)) {
             viewBinding.timerControl.updateLayoutParams<CoordinatorLayout.LayoutParams> {
                 topMargin = marginEnd + getThemeDimensionPixelOffset(appcompatR.attr.actionBarSize)
             }
@@ -232,6 +244,9 @@ class ReaderActivity :
         viewModel.isBookmarkAdded.observe(this, MenuInvalidator(this))
         viewModel.onAskNsfwIncognito.observeEvent(this) { askForIncognitoMode() }
         viewModel.onShowToast.observeEvent(this) { msgId ->
+            if (msgId == R.string.bookmark_added || msgId == R.string.bookmark_removed) {
+                viewBinding.container.performConfirmHapticFeedback()
+            }
             Snackbar.make(viewBinding.container, msgId, Snackbar.LENGTH_SHORT)
                 .setAnchorView(viewBinding.toolbarDocked)
                 .show()
@@ -244,7 +259,11 @@ class ReaderActivity :
         }
         settings.observeAsFlow(AppSettings.KEY_READER_TRANSLATION_ENABLED) {
             isReaderTranslationEnabled
-        }.onEach {
+        }.onEach { enabled ->
+            if (enabled) {
+                translationShortcutVisibleForSession = true
+            }
+            viewBinding.actionsView.setTranslateButtonContextualVisible(translationShortcutVisibleForSession)
             updateTranslationToggleButton()
             invalidateOptionsMenu()
             viewModel.reload()
@@ -277,6 +296,30 @@ class ReaderActivity :
         viewBinding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             applyDoubleModeAuto()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!enableTranslationAfterSetup) {
+            return
+        }
+        enableTranslationAfterSetup = false
+        if (!viewModel.hasTranslationEngineConfigured()) {
+            return
+        }
+        viewModel.getTranslationBypassHint(this)?.let { hint ->
+            viewBinding.toastView.showTemporary(hint, 2000L)
+            return
+        }
+        translationShortcutVisibleForSession = true
+        settings.isReaderTranslationEnabled = true
+        settings.isReaderTranslationShowTranslated = true
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_TRANSLATION_SHORTCUT_VISIBLE, translationShortcutVisibleForSession)
+        outState.putBoolean(STATE_ENABLE_TRANSLATION_AFTER_SETUP, enableTranslationAfterSetup)
+        super.onSaveInstanceState(outState)
     }
 
     override fun getParentActivityIntent(): Intent? {
@@ -773,11 +816,17 @@ class ReaderActivity :
     }
 
     private fun toggleTranslationLayer() {
-        viewModel.getTranslationBypassHint(this)?.let { hint ->
-            viewBinding.toastView.showTemporary(hint, 2000L)
-            return
-        }
         if (!settings.isReaderTranslationEnabled) {
+            if (!viewModel.hasTranslationEngineConfigured()) {
+                enableTranslationAfterSetup = true
+                router.openTranslationSettings()
+                return
+            }
+            viewModel.getTranslationBypassHint(this)?.let { hint ->
+                viewBinding.toastView.showTemporary(hint, 2000L)
+                return
+            }
+            translationShortcutVisibleForSession = true
             settings.isReaderTranslationEnabled = true
             settings.isReaderTranslationShowTranslated = true
             viewBinding.toastView.showTemporary(
@@ -786,18 +835,10 @@ class ReaderActivity :
             )
             return
         }
-        val showTranslated = settings.isReaderTranslationShowTranslated
-        if (!showTranslated) {
-            // Allow enabling even if IDLE - this will trigger PageLoader to schedule it if needed
-            settings.isReaderTranslationShowTranslated = true
-        } else {
-            settings.isReaderTranslationShowTranslated = false
-        }
+        settings.isReaderTranslationShowTranslated = false
+        settings.isReaderTranslationEnabled = false
         viewBinding.toastView.showTemporary(
-            getString(
-                if (!showTranslated) R.string.reader_translation_mode_switched_translated
-                else R.string.reader_translation_mode_switched_original,
-            ),
+            getString(R.string.reader_translation_mode_switched_original),
             1500L,
         )
     }
@@ -1063,5 +1104,7 @@ class ReaderActivity :
         private const val LOG_TAG = "ReaderDebug"
         private const val TOAST_DURATION = 2000L
         private const val TRANSLATION_PROGRESS_MIN_INTERVAL_MS = 800L
+        private const val STATE_TRANSLATION_SHORTCUT_VISIBLE = "translation_shortcut_visible"
+        private const val STATE_ENABLE_TRANSLATION_AFTER_SETUP = "enable_translation_after_setup"
     }
 }

@@ -15,8 +15,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -119,7 +120,7 @@ fun DetailsCoverFrame(
 
     Box(
         modifier = modifier
-            .width(132.dp)
+            .width(120.dp)
             .shadow(
                 elevation = 18.dp,
                 shape = MaterialTheme.shapes.large,
@@ -411,6 +412,8 @@ fun DetailsHeaderIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     filled: Boolean = false,
+    buttonSize: androidx.compose.ui.unit.Dp = 42.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 18.dp,
     onLongClick: (() -> Unit)? = null,
 ) {
     val expressive = LocalMaterialExpressiveComponentsEnabled.current
@@ -434,18 +437,18 @@ fun DetailsHeaderIconButton(
         ) {
             Box(
                 modifier = Modifier
+                    .size(buttonSize)
                     .combinedClickable(
                         enabled = enabled,
                         onClick = onClick,
                         onLongClick = onLongClick,
-                    )
-                    .padding(12.dp),
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     painter = rememberSafePainter(iconRes),
                     contentDescription = null,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(iconSize),
                     tint = if (expressive) {
                         MaterialTheme.colorScheme.onPrimaryContainer
                     } else {
@@ -471,18 +474,18 @@ fun DetailsHeaderIconButton(
         ) {
             Box(
                 modifier = Modifier
+                    .size(buttonSize)
                     .combinedClickable(
                         enabled = enabled,
                         onClick = onClick,
                         onLongClick = onLongClick,
-                    )
-                    .padding(12.dp),
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     painter = rememberSafePainter(iconRes),
                     contentDescription = null,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(iconSize),
                     tint = MaterialTheme.colorScheme.onSurface,
                 )
             }
@@ -496,8 +499,11 @@ fun MetadataItem(
     value: String,
     @DrawableRes iconRes: Int? = null,
     modifier: Modifier = Modifier,
+    valueMuted: Boolean = false,
     onClick: (() -> Unit)? = null,
+    showNavigationIndicator: Boolean = false,
 ) {
+    val contentAlpha = if (valueMuted) 0.62f else 1f
     Row(
         modifier = modifier
             .then(
@@ -507,37 +513,34 @@ fun MetadataItem(
                     Modifier
                 },
             )
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 4.dp, vertical = 3.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.widthIn(min = 56.dp),
-        ) {
-            iconRes?.let {
-                Icon(
-                    painter = rememberSafePainter(it),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(12.dp),
-                )
-            }
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        iconRes?.let {
+            Icon(
+                painter = rememberSafePainter(it),
+                contentDescription = label,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
+                modifier = Modifier.size(15.dp),
             )
         }
         Text(
             text = value,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        if (showNavigationIndicator) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
+                modifier = Modifier.size(16.dp),
+            )
+        }
     }
 }
 
@@ -593,7 +596,9 @@ data class DetailsInfoItem(
     val label: String,
     val value: String,
     @DrawableRes val iconRes: Int? = null,
+    val valueMuted: Boolean = false,
     val onClick: (() -> Unit)? = null,
+    val showNavigationIndicator: Boolean = false,
 )
 
 data class DetailsHeroBadgeSpec(

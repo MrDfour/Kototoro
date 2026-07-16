@@ -22,6 +22,7 @@ import org.skepsun.kototoro.core.prefs.AppSettings
 import org.skepsun.kototoro.core.prefs.ReaderControl
 import org.skepsun.kototoro.core.util.ext.hasVisibleChildren
 import org.skepsun.kototoro.core.util.ext.isRtl
+import org.skepsun.kototoro.core.util.ext.performSegmentHapticFeedback
 import org.skepsun.kototoro.core.util.ext.setContentDescriptionAndTooltip
 import org.skepsun.kototoro.core.util.ext.setTooltipCompat
 import org.skepsun.kototoro.core.util.ext.setValueRounded
@@ -30,7 +31,6 @@ import org.skepsun.kototoro.details.ui.pager.ChaptersPagesSheet
 import org.skepsun.kototoro.details.ui.pager.ChaptersPagesSheet.Companion.TAB_PAGES
 import org.skepsun.kototoro.reader.ui.ReaderControlDelegate.OnInteractionListener
 import javax.inject.Inject
-import com.google.android.material.R as materialR
 
 @AndroidEntryPoint
 class ReaderActionsView @JvmOverloads constructor(
@@ -47,6 +47,8 @@ class ReaderActionsView @JvmOverloads constructor(
 	lateinit var settings: AppSettings
 
 	private val binding = LayoutReaderActionsBinding.inflate(LayoutInflater.from(context), this)
+	private val sliderThumbWidth = binding.slider.thumbWidth
+	private val sliderThumbHeight = binding.slider.thumbHeight
 	private val rotationObserver = object : ContentObserver(handler) {
 		override fun onChange(selfChange: Boolean) {
 			post {
@@ -56,8 +58,10 @@ class ReaderActionsView @JvmOverloads constructor(
 	}
 	private var isSliderChanged = false
 	private var isSliderTracking = false
+	private var lastHapticSliderValue: Int? = null
 	private var pageLabelFormatter: ((Int, Int) -> String)? = null
 	private var translateButtonRequestedVisible = false
+	private var translateButtonContextualVisible = false
 
 	var isSliderEnabled: Boolean
 		get() = binding.slider.isEnabled
@@ -161,15 +165,21 @@ class ReaderActionsView @JvmOverloads constructor(
 
 	override fun onValueChange(slider: Slider, value: Float, fromUser: Boolean) {
 		if (fromUser) {
+			val page = value.toInt()
+			if (page != lastHapticSliderValue) {
+				slider.performSegmentHapticFeedback()
+				lastHapticSliderValue = page
+			}
 			if (isSliderTracking) {
 				isSliderChanged = true
 			} else {
-				listener?.switchPageTo(value.toInt())
+				listener?.switchPageTo(page)
 			}
 		}
 	}
 
 	override fun onStartTrackingTouch(slider: Slider) {
+		lastHapticSliderValue = slider.value.toInt()
 		if (!isSliderTracking) {
 			isSliderChanged = false
 			isSliderTracking = true
@@ -178,6 +188,7 @@ class ReaderActionsView @JvmOverloads constructor(
 
 	override fun onStopTrackingTouch(slider: Slider) {
 		isSliderTracking = false
+		lastHapticSliderValue = null
 		if (isSliderChanged) {
 			listener?.switchPageTo(slider.value.toInt())
 		}
@@ -218,7 +229,7 @@ class ReaderActionsView @JvmOverloads constructor(
 	}
 
 	/**
-	 * 显示/隐藏翻译按钮（仅在小说阅读器中显示）
+	 * 根据阅读器能力请求显示或隐藏翻译按钮。
 	 */
 	fun setTranslateButtonVisible(visible: Boolean) {
 		translateButtonRequestedVisible = visible
@@ -226,8 +237,14 @@ class ReaderActionsView @JvmOverloads constructor(
 		adjustLayoutParams()
 	}
 
+	fun setTranslateButtonContextualVisible(visible: Boolean) {
+		translateButtonContextualVisible = visible
+		applyTranslateButtonVisibility()
+		adjustLayoutParams()
+	}
+
 	/**
-	 * 更新翻译按钮的激活状态（翻译中时高亮显示）
+	 * 更新翻译按钮的激活状态。
 	 */
 	fun setTranslateActive(isActive: Boolean) {
 		binding.buttonTranslate.isSelected = isActive
@@ -266,7 +283,9 @@ class ReaderActionsView @JvmOverloads constructor(
 	}
 
 	private fun applyTranslateButtonVisibility() {
-		val visible = translateButtonRequestedVisible && ReaderControl.TRANSLATE in settings.readerControls
+		val visible = translateButtonRequestedVisible && (
+			translateButtonContextualVisible || ReaderControl.TRANSLATE in settings.readerControls
+		)
 		binding.buttonTranslate.isVisible = visible
 		(binding.buttonTranslate.parent as? View)?.isVisible = visible
 	}
@@ -335,15 +354,7 @@ class ReaderActionsView @JvmOverloads constructor(
 	) == 1
 
 	private fun Slider.setThumbVisible(visible: Boolean) {
-		thumbWidth = if (visible) {
-			resources.getDimensionPixelSize(materialR.dimen.m3_comp_slider_active_handle_width)
-		} else {
-			0
-		}
-		thumbHeight = if (visible) {
-			resources.getDimensionPixelSize(materialR.dimen.m3_comp_slider_active_handle_height)
-		} else {
-			0
-		}
+		thumbWidth = if (visible) sliderThumbWidth else 0
+		thumbHeight = if (visible) sliderThumbHeight else 0
 	}
 }

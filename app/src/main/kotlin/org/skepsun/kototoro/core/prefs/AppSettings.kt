@@ -142,6 +142,10 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		get() = prefs.getBoolean(KEY_THEME_AMOLED, false)
 		set(value) = prefs.edit { putBoolean(KEY_THEME_AMOLED, value) }
 
+	var backgroundStyle: BackgroundStyle
+		get() = prefs.getEnumValue(KEY_BACKGROUND_STYLE, BackgroundStyle.DEFAULT)
+		set(value) = prefs.edit { putEnumValue(KEY_BACKGROUND_STYLE, value) }
+
 	var tabletUiMode: TabletUiMode
 		get() = prefs.getEnumValue(KEY_TABLET_UI_MODE, TabletUiMode.RELAXED)
 		set(value) = prefs.edit { putEnumValue(KEY_TABLET_UI_MODE, value) }
@@ -309,7 +313,7 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		}
 
 	var panoramaCoverExtraHeight: Int
-		get() = prefs.getSafeInt(KEY_PANORAMA_EXTRA_HEIGHT, 50).coerceIn(0, 100)
+		get() = prefs.getSafeInt(KEY_PANORAMA_EXTRA_HEIGHT, 0).coerceIn(0, 100)
 		set(value) = prefs.edit { putInt(KEY_PANORAMA_EXTRA_HEIGHT, value.coerceIn(0, 100)) }
 
 	var panoramaBottomGradientAlpha: Int
@@ -317,12 +321,12 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		set(value) = prefs.edit { putInt(KEY_PANORAMA_BOTTOM_GRADIENT_ALPHA, value.coerceIn(0, 100)) }
 
 	var browsePanoramaBottomGradientAlpha: Int
-		get() = prefs.getSafeInt(KEY_BROWSE_PANORAMA_BOTTOM_GRADIENT_ALPHA, panoramaBottomGradientAlpha)
+		get() = prefs.getSafeInt(KEY_BROWSE_PANORAMA_BOTTOM_GRADIENT_ALPHA, 100)
 			.coerceIn(0, 100)
 		set(value) = prefs.edit { putInt(KEY_BROWSE_PANORAMA_BOTTOM_GRADIENT_ALPHA, value.coerceIn(0, 100)) }
 
 	var browsePanoramaBlendHeight: Int
-		get() = prefs.getSafeInt(KEY_BROWSE_PANORAMA_BLEND_HEIGHT, 156).coerceIn(48, 220)
+		get() = prefs.getSafeInt(KEY_BROWSE_PANORAMA_BLEND_HEIGHT, 220).coerceIn(48, 220)
 		set(value) = prefs.edit { putInt(KEY_BROWSE_PANORAMA_BLEND_HEIGHT, value.coerceIn(48, 220)) }
 
 	var isPanoramaDownsampleEnabled: Boolean
@@ -424,21 +428,20 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		set(value) = prefs.edit { putString(KEY_HUGGINGFACE_MIRROR, value.value) }
 
 	enum class BangumiMirror(val value: String) {
-		BGMMI_ANIBT("bgmmi_anibt"),
 		BANGUMI_LOL("bangumi_lol"),
 		NATIVE("native"),
 		CUSTOM("custom");
 
 		companion object {
 			fun fromValue(value: String?): BangumiMirror = when (value) {
-				"bangumi_one" -> BGMMI_ANIBT
-				else -> entries.find { it.value == value } ?: BGMMI_ANIBT
+				"bangumi_one", "bgmmi_anibt" -> BANGUMI_LOL
+				else -> entries.find { it.value == value } ?: BANGUMI_LOL
 			}
 		}
 	}
 
 	var bangumiMirror: BangumiMirror
-		get() = BangumiMirror.fromValue(prefs.getString(KEY_BANGUMI_MIRROR, BangumiMirror.BGMMI_ANIBT.value))
+		get() = BangumiMirror.fromValue(prefs.getString(KEY_BANGUMI_MIRROR, BangumiMirror.BANGUMI_LOL.value))
 		set(value) = prefs.edit { putString(KEY_BANGUMI_MIRROR, value.value) }
 
 	var bangumiMirrorCustomBase: String?
@@ -566,8 +569,9 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 	val readerAnimation: ReaderAnimation
 		get() = prefs.getEnumValue(KEY_READER_ANIMATION, ReaderAnimation.DEFAULT)
 
-	val readerBackground: ReaderBackground
+	var readerBackground: ReaderBackground
 		get() = prefs.getEnumValue(KEY_READER_BACKGROUND, ReaderBackground.DEFAULT)
+		set(value) = prefs.edit { putEnumValue(KEY_READER_BACKGROUND, value) }
 
 	var videoDecoderMode: VideoDecoderMode
 		get() = prefs.getEnumValue(KEY_VIDEO_DECODER_MODE, VideoDecoderMode.HARDWARE)
@@ -809,6 +813,14 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		get() = prefs.getBoolean(KEY_SHOW_ALL_UPDATES, false)
 		set(value) = prefs.edit { putBoolean(KEY_SHOW_ALL_UPDATES, value) }
 
+	var feedLimit: Int
+		get() = prefs.getInt(KEY_FEED_LIMIT, 200)
+		set(value) = prefs.edit { putInt(KEY_FEED_LIMIT, value) }
+
+	var feedLastOpenTime: Long
+		get() = prefs.getLong(KEY_FEED_LAST_OPEN_TIME, 0L)
+		set(value) = prefs.edit { putLong(KEY_FEED_LAST_OPEN_TIME, value) }
+
 	var progressIndicatorMode: ProgressIndicatorMode
 		get() = prefs.getEnumValue(KEY_PROGRESS_INDICATORS, ProgressIndicatorMode.PERCENT_READ)
 		set(value) = prefs.edit { putEnumValue(KEY_PROGRESS_INDICATORS, value) }
@@ -871,7 +883,7 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		set(value) = prefs.edit { putInt(KEY_HAZE_OPACITY, value.coerceIn(0, 100)) }
 
 	var glassMaterialPreset: GlassMaterialPreset
-		get() = prefs.getString(KEY_GLASS_MATERIAL_PRESET, GlassMaterialPreset.HAZE_THICK.name)
+		get() = prefs.getString(KEY_GLASS_MATERIAL_PRESET, GlassMaterialPreset.KOTOTORO.name)
 			?.let { raw ->
 				GlassMaterialPreset.entries.firstOrNull { preset -> preset.name == raw }
 			}
@@ -987,6 +999,10 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 	var isDetailsTranslateButtonVisible: Boolean
 		get() = prefs.getBoolean(KEY_DETAILS_TRANSLATE_BUTTON, true)
 		set(value) = prefs.edit { putBoolean(KEY_DETAILS_TRANSLATE_BUTTON, value) }
+
+	var isModernDetailsDockEnabled: Boolean
+		get() = prefs.getBoolean(KEY_MODERN_DETAILS_DOCK, false)
+		set(value) = prefs.edit { putBoolean(KEY_MODERN_DETAILS_DOCK, value) }
 
 	var defaultDetailsTab: Int
 		get() = if (isPagesTabEnabled) {
@@ -1111,14 +1127,33 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		get() = prefs.getString(KEY_READER_TRANSLATION_TARGET_LANG, "zh") ?: "zh"
 		set(value) = prefs.edit { putString(KEY_READER_TRANSLATION_TARGET_LANG, value) }
 
+	var readerTranslationOcrMode: ReaderOcrMode
+		get() = prefs.getEnumValue(
+			KEY_READER_TRANSLATION_OCR_MODE,
+			if (prefs.getString(KEY_READER_TRANSLATION_PADDLE_DET_MODEL_ID, null).isNullOrBlank() ||
+				prefs.getString(KEY_READER_TRANSLATION_PADDLE_DET_MODEL_ID, null) == "MLKIT"
+			) {
+				ReaderOcrMode.BASIC
+			} else {
+				ReaderOcrMode.ADVANCED
+			},
+		)
+		set(value) = prefs.edit { putEnumValue(KEY_READER_TRANSLATION_OCR_MODE, value) }
+
 	val readerTranslationOcrEngine: ReaderOcrEngine
-		get() = prefs.getEnumValue(KEY_READER_TRANSLATION_OCR_ENGINE, ReaderOcrEngine.MLKIT)
+		get() = when (readerTranslationOcrMode) {
+			ReaderOcrMode.BASIC -> ReaderOcrEngine.MLKIT
+			ReaderOcrMode.ADVANCED -> ReaderOcrEngine.PADDLE
+		}
 
 	val readerTranslationMode: ReaderTranslationMode
-		get() = prefs.getEnumValue(KEY_READER_TRANSLATION_MODE, ReaderTranslationMode.LOCAL_FIRST)
+		get() = when (prefs.getEnumValue(KEY_READER_TRANSLATION_MODE, ReaderTranslationMode.LOCAL_ONLY)) {
+			ReaderTranslationMode.LOCAL_FIRST -> ReaderTranslationMode.LOCAL_ONLY
+			else -> prefs.getEnumValue(KEY_READER_TRANSLATION_MODE, ReaderTranslationMode.LOCAL_ONLY)
+		}
 
 	val readerTranslationPipelineMode: org.skepsun.kototoro.core.prefs.ReaderTranslationPipelineMode
-		get() = prefs.getEnumValue(KEY_READER_TRANSLATION_PIPELINE_MODE, org.skepsun.kototoro.core.prefs.ReaderTranslationPipelineMode.TWO_STAGE)
+		get() = org.skepsun.kototoro.core.prefs.ReaderTranslationPipelineMode.TWO_STAGE
 
 	val readerTranslationApiEndpoint: String
 		get() = prefs.getString(KEY_READER_TRANSLATION_API_ENDPOINT, "") ?: ""
@@ -1130,7 +1165,11 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		get() = prefs.getString(KEY_READER_TRANSLATION_API_MODEL, "gpt-4o-mini") ?: "gpt-4o-mini"
 
 	val readerTranslationApiProviderPreset: String
-		get() = prefs.getString(KEY_READER_TRANSLATION_API_PROVIDER_PRESET, "CUSTOM") ?: "CUSTOM"
+		get() = prefs.getString(KEY_READER_TRANSLATION_API_PROVIDER_PRESET, "CUSTOM")
+			?.trim()
+			?.uppercase()
+			?.takeIf { it in READER_TRANSLATION_API_PROVIDER_PRESETS }
+			?: "CUSTOM"
 
 	val readerTranslationApiCustomHeaders: String
 		get() = prefs.getString(KEY_READER_TRANSLATION_API_CUSTOM_HEADERS, "") ?: ""
@@ -1157,7 +1196,7 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		get() = prefs.getString(KEY_READER_TRANSLATION_BUBBLE_GROUPING_TUNING, "BALANCED") ?: "BALANCED"
 
 	val readerTranslationOcrPipelineStrategy: String
-		get() = prefs.getString(KEY_READER_TRANSLATION_OCR_PIPELINE_STRATEGY, "HYBRID") ?: "HYBRID"
+		get() = prefs.getString(KEY_READER_TRANSLATION_OCR_PIPELINE_STRATEGY, "PAGE_TEXT_FIRST") ?: "PAGE_TEXT_FIRST"
 
 	var isReaderTranslationBubbleDetectorEnabled: Boolean
 		get() = prefs.getBoolean(KEY_READER_TRANSLATION_BUBBLE_DETECTOR_ENABLED, true)
@@ -1170,14 +1209,64 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 	val readerTranslationOverlayCompactness: String
 		get() = prefs.getString(KEY_READER_TRANSLATION_OVERLAY_COMPACTNESS, "BALANCED") ?: "BALANCED"
 
+	val readerTranslationRenderStyle: String
+		get() = prefs.getString(KEY_READER_TRANSLATION_RENDER_STYLE, "COMPACT_OVERLAY") ?: "COMPACT_OVERLAY"
+
 	val readerTranslationPaddleModelPath: String
 		get() = prefs.getString(KEY_READER_TRANSLATION_PADDLE_MODEL_PATH, "") ?: ""
 
+	val readerTranslationAdvancedRecModelId: String
+		get() = when (val modelId = prefs.getString(KEY_READER_TRANSLATION_PADDLE_OFFICIAL_MODEL_ID, "AUTO")) {
+			"en_ppocrv5_mobile_rec_onnx" -> "latin_ppocrv5_mobile_rec_onnx"
+			"korean_ppocrv3_mobile_rec_onnx" -> "korean_ppocrv5_mobile_rec_onnx"
+			"AUTO",
+			"mangaocr_2025_onnx",
+			"manga_48px_ctc_onnx",
+			"ppocrv6_medium_rec_onnx",
+			"latin_ppocrv5_mobile_rec_onnx",
+			"korean_ppocrv5_mobile_rec_onnx",
+			"thai_ppocrv5_mobile_rec_onnx",
+			-> modelId
+			else -> "AUTO"
+		}
+
 	val readerTranslationPaddleOfficialModelId: String
-		get() = prefs.getString(KEY_READER_TRANSLATION_PADDLE_OFFICIAL_MODEL_ID, "") ?: ""
+		get() = when (readerTranslationOcrMode) {
+			ReaderOcrMode.BASIC -> "MLKIT"
+			ReaderOcrMode.ADVANCED -> readerTranslationAdvancedRecModelId
+		}
+
+	val readerTranslationAdvancedDetModelId: String
+		get() = prefs.getString(KEY_READER_TRANSLATION_PADDLE_DET_MODEL_ID, DEFAULT_READER_TRANSLATION_PADDLE_DET_MODEL_ID)
+			?.takeIf {
+				it == "comic_text_detector_onnx" ||
+					it == "manga_default_det_20241225_onnx"
+			}
+			?: DEFAULT_READER_TRANSLATION_PADDLE_DET_MODEL_ID
 
 	val readerTranslationPaddleDetModelId: String
-		get() = prefs.getString(KEY_READER_TRANSLATION_PADDLE_DET_MODEL_ID, "MLKIT") ?: "MLKIT"
+		get() = when (readerTranslationOcrMode) {
+			ReaderOcrMode.BASIC -> "MLKIT"
+			ReaderOcrMode.ADVANCED -> readerTranslationAdvancedDetModelId
+		}
+
+	val readerTranslationOcrDetectionMaxSide: Int
+		get() = DEFAULT_READER_TRANSLATION_OCR_DETECTION_MAX_SIDE
+
+	val readerTranslationOcrDetectionThreshold: Float
+		get() = DEFAULT_READER_TRANSLATION_OCR_DETECTION_THRESHOLD
+
+	val readerTranslationOcrMinBoxSize: Int
+		get() = DEFAULT_READER_TRANSLATION_OCR_MIN_BOX_SIZE
+
+	val readerTranslationOcrRecognitionThreshold: Float
+		get() = DEFAULT_READER_TRANSLATION_OCR_RECOGNITION_THRESHOLD
+
+	val readerTranslationOcrRecognitionMaxWidth: Int
+		get() = DEFAULT_READER_TRANSLATION_OCR_RECOGNITION_MAX_WIDTH
+
+	val readerTranslationOcrRecognitionBatchSize: Int
+		get() = DEFAULT_READER_TRANSLATION_OCR_RECOGNITION_BATCH_SIZE
 
 	val readerTranslationPaddleModelUrl: String
 		get() = prefs.getString(KEY_READER_TRANSLATION_PADDLE_MODEL_URL, null) 
@@ -1223,7 +1312,7 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		set(value) = prefs.edit { putString(KEY_READER_TRANSLATION_BUBBLE_YOLO_URL, value) }
 
 	var readerTranslationOnnxModelId: String
-		get() = prefs.getString(KEY_READER_TRANSLATION_ONNX_MODEL_ID, "") ?: ""
+		get() = ""
 		set(value) = prefs.edit { putString(KEY_READER_TRANSLATION_ONNX_MODEL_ID, value) }
 
 	var readerTranslationBubbleDetectorModelId: String
@@ -1360,7 +1449,7 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		set(value) = prefs.edit { putBoolean(KEY_BROWSE_TRACKING_RECOMMENDATIONS, value) }
 
 	var isBrowseMoreTrackingRecommendationsEnabled: Boolean
-		get() = prefs.getBoolean(KEY_BROWSE_MORE_TRACKING_RECOMMENDATIONS, true)
+		get() = prefs.getBoolean(KEY_BROWSE_MORE_TRACKING_RECOMMENDATIONS, false)
 		set(value) = prefs.edit { putBoolean(KEY_BROWSE_MORE_TRACKING_RECOMMENDATIONS, value) }
 
 	val isSuggestionsWiFiOnly: Boolean
@@ -1983,6 +2072,17 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 	}
 
 	companion object {
+		private val READER_TRANSLATION_API_PROVIDER_PRESETS = setOf(
+			"CUSTOM",
+			"OPENAI",
+			"DEEPSEEK",
+			"ZHIPU",
+			"ALIBABA",
+			"MOONSHOT",
+			"ANTHROPIC",
+			"GEMINI",
+			"OPENROUTER",
+		)
 
 		private val CORNER_RADIUS_ALLOWED_VALUES = setOf(-1, 12, 16, 20, 24)
 
@@ -2010,6 +2110,7 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		const val KEY_THEME = "theme"
 		const val KEY_COLOR_THEME = "color_theme"
 		const val KEY_THEME_AMOLED = "amoled_theme"
+		const val KEY_BACKGROUND_STYLE = "background_style"
 		const val KEY_MATERIAL_EXPRESSIVE_COMPONENTS = "material_expressive_components"
 		const val KEY_APP_FONT_PRESET = "app_font_preset"
 		const val KEY_EXPRESSIVE_APP_FONT_PRESET = "expressive_app_font_preset"
@@ -2120,13 +2221,22 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		const val KEY_READER_E2E_API_CONCURRENCY = "reader_e2e_api_concurrency"
 		const val KEY_READER_TRANSLATION_OCR_PIPELINE_STRATEGY = "reader_translation_ocr_pipeline_strategy"
 		const val KEY_READER_TRANSLATION_BUBBLE_GROUPING_TUNING = "reader_translation_bubble_grouping_tuning"
-			const val KEY_READER_TRANSLATION_BUBBLE_DETECTOR_ENABLED = "reader_translation_bubble_detector_enabled"
-			const val KEY_READER_TRANSLATION_BUBBLE_GROUPING_ENABLED = "reader_translation_bubble_grouping_enabled"
-			const val KEY_READER_TRANSLATION_OVERLAY_COMPACTNESS = "reader_translation_overlay_compactness"
+		const val KEY_READER_TRANSLATION_BUBBLE_DETECTOR_ENABLED = "reader_translation_bubble_detector_enabled"
+		const val KEY_READER_TRANSLATION_BUBBLE_GROUPING_ENABLED = "reader_translation_bubble_grouping_enabled"
+		const val KEY_READER_TRANSLATION_OVERLAY_COMPACTNESS = "reader_translation_overlay_compactness"
+		const val KEY_READER_TRANSLATION_RENDER_STYLE = "reader_translation_render_style"
 		const val KEY_READER_TRANSLATION_PADDLE_MODEL_PATH = "reader_translation_paddle_model_path"
 		const val KEY_READER_TRANSLATION_PADDLE_OCR_ONLY = "reader_translation_paddle_ocr_only"
+		const val KEY_READER_TRANSLATION_OCR_MODE = "reader_translation_ocr_mode"
 		const val KEY_READER_TRANSLATION_PADDLE_OFFICIAL_MODEL_ID = "reader_translation_paddle_official_model_id"
 		const val KEY_READER_TRANSLATION_PADDLE_DET_MODEL_ID = "reader_translation_paddle_det_model_id"
+		const val DEFAULT_READER_TRANSLATION_PADDLE_DET_MODEL_ID = "manga_default_det_20241225_onnx"
+		const val DEFAULT_READER_TRANSLATION_OCR_DETECTION_MAX_SIDE = 1536
+		const val DEFAULT_READER_TRANSLATION_OCR_DETECTION_THRESHOLD = 0.4f
+		const val DEFAULT_READER_TRANSLATION_OCR_MIN_BOX_SIZE = 6
+		const val DEFAULT_READER_TRANSLATION_OCR_RECOGNITION_THRESHOLD = 0.1f
+		const val DEFAULT_READER_TRANSLATION_OCR_RECOGNITION_MAX_WIDTH = 320
+		const val DEFAULT_READER_TRANSLATION_OCR_RECOGNITION_BATCH_SIZE = 16
 		const val KEY_READER_TRANSLATION_PADDLE_MODEL_URL = "reader_translation_paddle_model_url"
 		const val KEY_READER_TRANSLATION_PADDLE_MODEL_VERSION = "reader_translation_paddle_model_version"
 		const val KEY_READER_TRANSLATION_PADDLE_MODEL_SHA256 = "reader_translation_paddle_model_sha256"
@@ -2328,6 +2438,7 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		const val KEY_CF_BOOK = "cf_book"
 		const val KEY_PAGES_TAB = "pages_tab"
 		const val KEY_DETAILS_TRANSLATE_BUTTON = "details_translate_button"
+		const val KEY_MODERN_DETAILS_DOCK = "modern_details_dock"
 		const val KEY_DETAILS_TAB = "details_tab"
 		const val KEY_DETAILS_LAST_TAB = "details_last_tab"
 		const val KEY_READING_TIME = "reading_time"
@@ -2336,6 +2447,8 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		const val KEY_STATS_ENABLED = "stats_on"
 		const val KEY_FEED_HEADER = "feed_header"
 		const val KEY_SHOW_ALL_UPDATES = "show_all_updates"
+		const val KEY_FEED_LIMIT = "feed_limit"
+		const val KEY_FEED_LAST_OPEN_TIME = "feed_last_open_time"
 		const val KEY_SEARCH_SUGGESTION_TYPES = "search_suggest_types"
 		const val KEY_SOURCES_VERSION = "sources_version"
 		const val KEY_SOURCES_ENABLED_ALL = "sources_enabled_all"
@@ -2496,7 +2609,8 @@ class AppSettings @Inject constructor(@ApplicationContext private val context: C
 		set(value) = prefs.edit { putString(KEY_FILTER_PILL_RIGHT, value.name) }
 
 	object GlassMaterialDefaults {
-		const val DEFAULT_OPACITY_PERCENT = 80
+		const val DEFAULT_OPACITY_PERCENT = 30
+		const val STYLE_BASELINE_OPACITY_PERCENT = 80
 		const val DEFAULT_IMMERSIVE_STRENGTH_PERCENT = 100
 	}
 

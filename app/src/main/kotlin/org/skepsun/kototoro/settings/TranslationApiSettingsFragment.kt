@@ -1,11 +1,13 @@
 package org.skepsun.kototoro.settings
 
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
@@ -27,6 +29,7 @@ import org.skepsun.kototoro.core.prefs.AppSettings
 import org.skepsun.kototoro.core.ui.theme.KototoroTheme
 import org.skepsun.kototoro.settings.compose.TranslationApiSettingsScreen
 import org.skepsun.kototoro.settings.support.TranslationApiSettingsSupport
+import org.skepsun.kototoro.reader.translate.domain.TranslationApiProviderCatalog
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -75,14 +78,12 @@ class TranslationApiSettingsFragment : Fragment() {
                     Toast.makeText(requireContext(), R.string.reader_translation_api_endpoint_missing, Toast.LENGTH_SHORT).show()
                     return@launch
                 }
-                val modelsUrl = TranslationApiSettingsSupport.buildModelsUrl(endpoint)
+				val providerId = settings.readerTranslationApiProviderPreset
+				val modelsUrl = TranslationApiSettingsSupport.buildModelsUrl(endpoint, providerId)
                 val key = settings.readerTranslationApiKey.trim()
                 val models = withContext(Dispatchers.IO) {
                     val requestBuilder = Request.Builder().get().url(modelsUrl)
-                    if (key.isNotBlank()) {
-                        requestBuilder.header("Authorization", "Bearer $key")
-                        requestBuilder.header("X-API-Key", key)
-                    }
+					TranslationApiProviderCatalog.applyAuthentication(requestBuilder, providerId, key)
                     okHttpClient.newCall(requestBuilder.build()).execute().use { response ->
                         if (!response.isSuccessful) return@withContext emptyList<String>()
                         val body = response.body?.string().orEmpty()
@@ -126,6 +127,22 @@ fun TranslationApiSettingsRoute(
     onFetchModelsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    DisposableEffect(settings) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { sharedPreferences, key ->
+            if (key == AppSettings.KEY_READER_TRANSLATION_API_PROVIDER_PRESET) {
+                TranslationApiSettingsSupport.applyApiProviderPreset(
+                    sharedPreferences = sharedPreferences ?: settings.prefs,
+                    presetInput = settings.readerTranslationApiProviderPreset,
+                    forceOverride = true,
+                )
+            }
+        }
+        settings.prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose {
+            settings.prefs.unregisterOnSharedPreferenceChangeListener(listener)
+        }
+    }
+
     TranslationApiSettingsScreen(
         settings = settings,
         onFetchModelsClick = onFetchModelsClick,

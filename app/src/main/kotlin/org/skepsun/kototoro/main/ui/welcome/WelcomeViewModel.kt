@@ -39,6 +39,7 @@ class WelcomeViewModel @Inject constructor(
 	private val installService: ExtensionInstallService,
 	@LocalizedAppContext private val context: Context,
 ) : BaseViewModel() {
+	private val supportedContentTypes = listOf(ContentType.MANGA, ContentType.NOVEL, ContentType.VIDEO)
 
 	private var updateJob: Job? = null
 
@@ -56,7 +57,7 @@ class WelcomeViewModel @Inject constructor(
 
 	val types = MutableStateFlow(
 		FilterProperty(
-			availableItems = listOf(ContentType.MANGA),
+			availableItems = supportedContentTypes,
 			selectedItems = setOf(ContentType.MANGA),
 			isLoading = true,
 			error = null,
@@ -83,26 +84,11 @@ class WelcomeViewModel @Inject constructor(
 	fun refreshState() {
 		updateJob?.cancel()
 		updateJob = launchJob(Dispatchers.Default) {
-			val allSourcesSnapshot = repository.queryAllSources()
+			val allSourcesSnapshot = repository.queryAllSources(includeDisabledSources = true)
 			val localesGroupsSnapshot = allSourcesSnapshot.groupBy { it.getLocale() ?: Locale.ROOT }
 
-			// Map adult content types to their base types for display
-			val contentTypes = allSourcesSnapshot
-				.map { source ->
-					when (source.getContentType()) {
-						ContentType.HENTAI_MANGA -> ContentType.MANGA
-						ContentType.HENTAI_NOVEL -> ContentType.NOVEL
-						ContentType.HENTAI_VIDEO -> ContentType.VIDEO
-						else -> source.getContentType()
-					}
-				}
-				.groupingBy { it }
-				.eachCount()
-				.toList()
-				.sortedByDescending { it.second }
-				.map { it.first }
 			types.value = types.value.copy(
-				availableItems = contentTypes,
+				availableItems = supportedContentTypes,
 				isLoading = false,
 			)
 			val previouslySelectedLanguages = settings.contentLanguages
@@ -183,6 +169,9 @@ class WelcomeViewModel @Inject constructor(
 						}
 					}
 				}
+				GlobalExtensionManager.initialize(context)
+				refreshState()
+				updateJob?.join()
 				android.util.Log.d("KototoroInit", "All background initialization work scheduled successfully.")
 				kotlinx.coroutines.withContext(Dispatchers.Main) {
 					if (newlyInstalledCount > 0) {
@@ -248,7 +237,7 @@ class WelcomeViewModel @Inject constructor(
 				else -> listOf(type)
 			}
 		}
-		val enabledSources = repository.queryAllSources()
+		val enabledSources = repository.queryAllSources(includeDisabledSources = true)
 			.filterTo(HashSet()) { x ->
 				val localeLang = x.getLocale()?.language ?: ""
 				val mappedLang = if (x is org.skepsun.kototoro.ireader.model.IReaderMangaSource) {

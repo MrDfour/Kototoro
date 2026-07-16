@@ -13,6 +13,7 @@ import org.skepsun.kototoro.local.epub.ChapterType
 import org.skepsun.kototoro.parsers.model.ContentChapter
 import org.skepsun.kototoro.parsers.util.mapToSet
 import org.skepsun.kototoro.core.model.isLocal
+import org.skepsun.kototoro.reader.ui.FULLY_READ_CHAPTER_ID
 
 /**
  * Checks if a chapter URL points to a local file (i.e. actually downloaded),
@@ -42,6 +43,7 @@ fun ContentDetails.mapChapters(
 	bookmarks: List<Bookmark>,
 	isGrid: Boolean,
 	isDownloadedOnly: Boolean,
+	shareProgressAcrossBranches: Boolean = false,
 ): List<ChapterListItem> {
 	val resolvedBranch = when {
 		branch == null -> null
@@ -83,8 +85,9 @@ fun ContentDetails.mapChapters(
 		null
 	}
 	
-	val currentChapterNumber = remoteChapters.find { it.id == currentChapterId }?.number
-		?: localChapters.find { it.id == currentChapterId }?.number
+	val currentChapter = remoteChapters.find { it.id == currentChapterId }
+		?: localChapters.find { it.id == currentChapterId }
+		?: if (shareProgressAcrossBranches) allChapters.find { it.id == currentChapterId } else null
 	
 	if (!isDownloadedOnly || local?.manga?.chapters == null) {
 		for ((index, chapter) in remoteChapters.withIndex()) {
@@ -98,10 +101,10 @@ fun ContentDetails.mapChapters(
 			}
 			val local = localById ?: localByUrl
 			val finalChapter = local ?: chapter
-			val isUnread = if (currentChapterNumber != null) {
-				chapter.number > currentChapterNumber
-			} else {
-				true
+			val isUnread = when {
+				currentChapterId == FULLY_READ_CHAPTER_ID -> false
+				currentChapter != null -> chapter.isAfter(currentChapter)
+				else -> true
 			}
 			
 			result += finalChapter.toListItem(
@@ -132,6 +135,14 @@ fun ContentDetails.mapChapters(
 	)
 	
 	return result
+}
+
+private fun ContentChapter.isAfter(current: ContentChapter): Boolean {
+	return if (volume > 0 && current.volume > 0 && volume != current.volume) {
+		volume > current.volume
+	} else {
+		number > current.number
+	}
 }
 
 fun List<ChapterListItem>.withVolumeHeaders(context: Context): MutableList<ListModel> {

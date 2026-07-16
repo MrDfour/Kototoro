@@ -26,6 +26,7 @@ import org.skepsun.kototoro.R
 import org.skepsun.kototoro.core.os.AppShortcutManager
 import org.skepsun.kototoro.core.prefs.AppSettings
 import org.skepsun.kototoro.core.prefs.AppFontPreset
+import org.skepsun.kototoro.core.prefs.BackgroundStyle
 import org.skepsun.kototoro.core.prefs.ColorScheme
 import org.skepsun.kototoro.core.prefs.ListMode
 import org.skepsun.kototoro.core.prefs.NavItem
@@ -153,6 +154,7 @@ private class AppearanceSettingsCoordinator(
         val coroutineScope = rememberCoroutineScope()
         val colorScheme = settings.observeAsState(AppSettings.KEY_COLOR_THEME) { colorScheme }.value
         val theme = settings.observeAsState(AppSettings.KEY_THEME) { theme }.value
+        val backgroundStyle = settings.observeAsState(AppSettings.KEY_BACKGROUND_STYLE) { backgroundStyle }.value
         val isAmoledTheme = settings.observeAsState(AppSettings.KEY_THEME_AMOLED) { isAmoledTheme }.value
         val isMaterialExpressiveComponentsEnabled =
             settings.observeAsState(AppSettings.KEY_MATERIAL_EXPRESSIVE_COMPONENTS) {
@@ -229,6 +231,8 @@ private class AppearanceSettingsCoordinator(
         val isPagesTabEnabled = settings.observeAsState(AppSettings.KEY_PAGES_TAB) { isPagesTabEnabled }.value
         val isDetailsTranslateButtonVisible =
             settings.observeAsState(AppSettings.KEY_DETAILS_TRANSLATE_BUTTON) { isDetailsTranslateButtonVisible }.value
+        val isModernDetailsDockEnabled =
+            settings.observeAsState(AppSettings.KEY_MODERN_DETAILS_DOCK) { isModernDetailsDockEnabled }.value
         val defaultDetailsTab =
             settings.observeAsState(AppSettings.KEY_PAGES_TAB, AppSettings.KEY_DETAILS_TAB) { defaultDetailsTab }.value
         val searchSuggestionTypes =
@@ -281,6 +285,7 @@ private class AppearanceSettingsCoordinator(
         val options = AppearanceSettingsOptions(
             colorSchemes = buildColorSchemeOptions(),
             themes = buildThemeOptions(),
+            backgroundStyles = buildBackgroundStyleOptions(),
             fontPresets = buildFontPresetOptions(),
             glassMaterialFamilies = buildGlassMaterialFamilyOptions(),
             tabletUiModes = buildTabletUiModeOptions(),
@@ -304,6 +309,7 @@ private class AppearanceSettingsCoordinator(
             navSummary = buildNavSummary(mainNavItems),
             colorScheme = colorScheme,
             theme = theme,
+            backgroundStyle = backgroundStyle,
             isAmoledTheme = isAmoledTheme,
             isMaterialExpressiveComponentsEnabled = isMaterialExpressiveComponentsEnabled,
             appFontPreset = appFontPreset,
@@ -347,6 +353,7 @@ private class AppearanceSettingsCoordinator(
             isDetailsPanoramaLimitedToInfoCardMidpoint = isDetailsPanoramaLimitedToInfoCardMidpoint,
             isPagesTabEnabled = isPagesTabEnabled,
             isDetailsTranslateButtonVisible = isDetailsTranslateButtonVisible,
+            isModernDetailsDockEnabled = isModernDetailsDockEnabled,
             defaultDetailsTab = defaultDetailsTab,
             searchSuggestionTypes = searchSuggestionTypes,
             isSharedElementTransitionsEnabled = effectiveSharedElementTransitionsEnabled,
@@ -378,6 +385,7 @@ private class AppearanceSettingsCoordinator(
             emptySelectionText = context.getString(R.string.none),
             onColorSchemeChange = { updateAndRestart(coroutineScope) { settings.colorScheme = it } },
             onThemeChange = ::updateTheme,
+            onBackgroundStyleChange = { updateAndRestart(coroutineScope) { settings.backgroundStyle = it } },
             onAmoledThemeChange = { updateAndRestart(coroutineScope) { settings.isAmoledTheme = it } },
             onMaterialExpressiveComponentsChange = {
                 updateAndRestart(coroutineScope) { settings.isMaterialExpressiveComponentsEnabled = it }
@@ -427,6 +435,7 @@ private class AppearanceSettingsCoordinator(
             },
             onPagesTabEnabledChange = { settings.isPagesTabEnabled = it },
             onDetailsTranslateButtonVisibleChange = { settings.isDetailsTranslateButtonVisible = it },
+            onModernDetailsDockEnabledChange = { settings.isModernDetailsDockEnabled = it },
             onDefaultDetailsTabChange = { settings.defaultDetailsTab = it },
             onSearchSuggestionTypesChange = { settings.searchSuggestionTypes = it },
             onNavConfigClick = onOpenNavConfig,
@@ -521,6 +530,15 @@ private class AppearanceSettingsCoordinator(
         return labels.zip(values).map { (label, value) -> SettingsChoiceOption(value, label) }
     }
 
+    private fun buildBackgroundStyleOptions(): List<SettingsChoiceOption<BackgroundStyle>> {
+        return listOf(
+            SettingsChoiceOption(BackgroundStyle.DEFAULT, context.getString(R.string.bg_style_default)),
+            SettingsChoiceOption(BackgroundStyle.DYNAMIC_ARTWORK_BLUR, context.getString(R.string.bg_style_artwork_blur)),
+            SettingsChoiceOption(BackgroundStyle.SYSTEM_DYNAMIC_TINT, context.getString(R.string.bg_style_system_tint)),
+            SettingsChoiceOption(BackgroundStyle.ELEVATED_CONTAINERS, context.getString(R.string.bg_style_elevated_containers)),
+        )
+    }
+
     private fun buildGlassMaterialFamilyOptions(): List<SettingsChoiceOption<GlassMaterialFamily>> {
         return listOf(
             SettingsChoiceOption(GlassMaterialFamily.KOTOTORO, context.getString(R.string.glass_material_family_kototoro)),
@@ -542,6 +560,7 @@ private class AppearanceSettingsCoordinator(
 
     private fun buildTabletUiModeOptions(): List<SettingsChoiceOption<TabletUiMode>> {
         return listOf(
+            SettingsChoiceOption(TabletUiMode.DISABLED, context.getString(R.string.tablet_ui_mode_disabled)),
             SettingsChoiceOption(TabletUiMode.RELAXED, context.getString(R.string.tablet_ui_mode_relaxed)),
             SettingsChoiceOption(TabletUiMode.STRICT, context.getString(R.string.tablet_ui_mode_strict)),
         )

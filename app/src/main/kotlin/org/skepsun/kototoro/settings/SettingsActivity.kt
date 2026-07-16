@@ -129,6 +129,7 @@ import org.skepsun.kototoro.settings.search.SettingsItem
 import org.skepsun.kototoro.settings.search.SettingsSearchMenuProvider
 import org.skepsun.kototoro.settings.search.SettingsSearchViewModel
 import org.skepsun.kototoro.settings.support.TranslationApiSettingsSupport
+import org.skepsun.kototoro.reader.translate.domain.TranslationApiProviderCatalog
 import org.skepsun.kototoro.core.exceptions.resolve.SnackbarErrorObserver
 import org.skepsun.kototoro.settings.sources.SourceComposeSettingsFragment
 import org.skepsun.kototoro.settings.sources.SourceSettingsRoute
@@ -1107,7 +1108,6 @@ class SettingsActivity :
 				AISettingsRoute(
 					onOpenOcrModels = { openDestination(SettingsDestination.OcrModelsSettings, null, false) },
 					onOpenApiSettings = { openDestination(SettingsDestination.TranslationApiSettings, null, false) },
-					onOpenE2eApiSettings = { openDestination(SettingsDestination.TranslationE2EApiSettings, null, false) },
 					onOpenTranslationSettings = { openDestination(SettingsDestination.TranslationSettings, null, false) },
 					onOpenImageEnhancementSettings = {
 						openDestination(SettingsDestination.AiImageEnhancementSettings, null, false)
@@ -1123,6 +1123,7 @@ class SettingsActivity :
 			) {
 				OcrModelsRoute(
 					onnxModelManager = onnxModelManager,
+					settings = kototoroAppSettings,
 					modifier = Modifier.fillMaxSize(),
 				)
 			}
@@ -1288,7 +1289,6 @@ class SettingsActivity :
 					onnxModelManager = onnxModelManager,
 					onOpenOcrModels = { openDestination(SettingsDestination.OcrModelsSettings, null, false) },
 					onOpenApiSettings = { openDestination(SettingsDestination.TranslationApiSettings, null, false) },
-					onOpenE2eApiSettings = { openDestination(SettingsDestination.TranslationE2EApiSettings, null, false) },
 				)
 			}
 			SettingsDestination.TranslationApiSettings -> RenderComposeSection(
@@ -1366,6 +1366,17 @@ class SettingsActivity :
 					settings = kototoroAppSettings,
 					onNotificationSoundClick = {
 						ringtonePickContract.launch(kototoroAppSettings.notificationSound)
+					},
+					onNotificationVibrateClick = {
+						trackerNotificationHelper.updateChannels()
+						startSettingsActivitySafe(
+							Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+								.putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName)
+								.putExtra(
+									android.provider.Settings.EXTRA_CHANNEL_ID,
+									TrackerNotificationHelper.CHANNEL_ID,
+								),
+						)
 					},
 				)
 			}
@@ -1654,14 +1665,12 @@ class SettingsActivity :
 					Toast.makeText(this@SettingsActivity, R.string.reader_translation_api_endpoint_missing, Toast.LENGTH_SHORT).show()
 					return@launch
 				}
-				val modelsUrl = TranslationApiSettingsSupport.buildModelsUrl(endpoint)
+				val providerId = kototoroAppSettings.readerTranslationApiProviderPreset
+				val modelsUrl = TranslationApiSettingsSupport.buildModelsUrl(endpoint, providerId)
 				val key = kototoroAppSettings.readerTranslationApiKey.trim()
 				val models = withContext(Dispatchers.IO) {
 					val requestBuilder = Request.Builder().get().url(modelsUrl)
-					if (key.isNotBlank()) {
-						requestBuilder.header("Authorization", "Bearer $key")
-						requestBuilder.header("X-API-Key", key)
-					}
+					TranslationApiProviderCatalog.applyAuthentication(requestBuilder, providerId, key)
 					okHttpClient.newCall(requestBuilder.build()).execute().use { response ->
 						if (!response.isSuccessful) return@withContext emptyList<String>()
 						TranslationApiSettingsSupport.parseModelIds(response.body?.string().orEmpty())

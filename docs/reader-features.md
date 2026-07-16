@@ -16,14 +16,21 @@ This keeps history, favorites, source access, and sync in one app instead of spl
 
 ### Local OCR + Translation
 
-Kototoro includes local OCR + translation directly inside the reader. This is one of the most distinctive parts of the project because it keeps the workflow close to the page instead of sending users to external desktop tools.
+Kototoro includes OCR + translation directly inside the reader. This is one of the most distinctive parts of the project because it keeps the workflow close to the page instead of sending users to external desktop tools.
 
-Typical workflow:
+**Manga translation workflow:**
 
-- Detect text from the page
-- Recognize it with the configured OCR pipeline
-- Translate locally or through an API
-- Render the translated result back into the reading view
+- Detect text from the page using the configured detector (ONNX bubble detector, DB-Net, or catch-all OCR)
+- Recognize text with the configured OCR engine (ML Kit, PaddleOCR, or MangaOCR)
+- Translate on-device in `Local` mode, or through a configured API provider in `API only` mode
+- Render a translated layer over the original page, with a reader control to return to the original image
+- Retranslate the current page, failed pages, or the current chapter and inspect their state in the translation task panel
+
+**Novel translation:**
+
+- Paragraphs are batched and sent to the same translation engine
+- Results stream in progressively via Flow
+- Supports `Translation only` and `Bilingual` display modes
 
 Read more: [Automatic Translation](./automatic-translation.md)
 
@@ -102,6 +109,8 @@ Kototoro supports novel-oriented workflows including:
 - Local novel reading
 - Illustrated chapter handling
 - EPUB-related flows where supported by the source and pipeline
+- **Novel translation** — automatic paragraph-level translation with `Translation only` and `Bilingual` display modes
+- **TTS (Text-to-Speech)** — voice reading with configurable engine and voice settings
 
 ### Video Consumption
 

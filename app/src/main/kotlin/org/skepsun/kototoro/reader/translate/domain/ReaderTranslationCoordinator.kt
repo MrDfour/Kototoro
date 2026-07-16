@@ -208,7 +208,7 @@ internal class ReaderTranslationCoordinator(
 		sourceLang: String,
 		targetLang: String,
 	): Map<String, String> {
-		val endpoint = settings.readerTranslationApiEndpoint.trim()
+		val endpoint = resolveTranslationApiEndpoint()
 		if (endpoint.isBlank() || texts.isEmpty()) {
 			return texts.associateWith { "" }
 		}
@@ -259,7 +259,7 @@ internal class ReaderTranslationCoordinator(
 		targetLang: String,
 	): Map<String, String> {
 		if (texts.isEmpty()) return emptyMap()
-		val endpoint = settings.readerTranslationApiEndpoint.trim()
+		val endpoint = resolveTranslationApiEndpoint()
 		val apiKey = settings.readerTranslationApiKey.trim()
 		val model = settings.readerTranslationApiModel.trim().ifBlank { defaultOpenAiModel }
 		val userPrompt = buildString {
@@ -293,10 +293,11 @@ internal class ReaderTranslationCoordinator(
 					.url(endpoint)
 					.post(payload.toString().toRequestBody(jsonMediaType))
 					.header("Content-Type", "application/json")
-				if (apiKey.isNotBlank()) {
-					requestBuilder.header("Authorization", "Bearer $apiKey")
-					requestBuilder.header("X-API-Key", apiKey)
-				}
+				TranslationApiProviderCatalog.applyAuthentication(
+					requestBuilder,
+					settings.readerTranslationApiProviderPreset,
+					apiKey,
+				)
 				applyCustomHeaders(requestBuilder)
 				val response = okHttpClient.newCall(requestBuilder.build()).await()
 				response.use { resp ->
@@ -331,7 +332,7 @@ internal class ReaderTranslationCoordinator(
 		targetLang: String,
 	): String {
 		if (text.isBlank()) return ""
-		val endpoint = settings.readerTranslationApiEndpoint.trim()
+		val endpoint = resolveTranslationApiEndpoint()
 		val apiKey = settings.readerTranslationApiKey.trim()
 		val model = settings.readerTranslationApiModel.trim().ifBlank { defaultOpenAiModel }
 		val userPrompt = buildString {
@@ -361,10 +362,11 @@ internal class ReaderTranslationCoordinator(
 					.url(endpoint)
 					.post(payload.toString().toRequestBody(jsonMediaType))
 					.header("Content-Type", "application/json")
-				if (apiKey.isNotBlank()) {
-					requestBuilder.header("Authorization", "Bearer $apiKey")
-					requestBuilder.header("X-API-Key", apiKey)
-				}
+				TranslationApiProviderCatalog.applyAuthentication(
+					requestBuilder,
+					settings.readerTranslationApiProviderPreset,
+					apiKey,
+				)
 				applyCustomHeaders(requestBuilder)
 				val response = okHttpClient.newCall(requestBuilder.build()).await()
 				response.use { resp ->
@@ -541,6 +543,7 @@ internal class ReaderTranslationCoordinator(
 			"it" -> TranslateLanguage.ITALIAN
 			"ja" -> TranslateLanguage.JAPANESE
 			"ko" -> TranslateLanguage.KOREAN
+			"th" -> TranslateLanguage.THAI
 			"nl" -> TranslateLanguage.DUTCH
 			"pl" -> TranslateLanguage.POLISH
 			"pt" -> TranslateLanguage.PORTUGUESE
@@ -558,7 +561,7 @@ internal class ReaderTranslationCoordinator(
 	}
 
 	private suspend fun translateByApi(text: String, sourceLang: String, targetLang: String): String {
-		val endpoint = settings.readerTranslationApiEndpoint.trim()
+		val endpoint = resolveTranslationApiEndpoint()
 		if (endpoint.isBlank()) {
 			return ""
 		}
@@ -572,10 +575,11 @@ internal class ReaderTranslationCoordinator(
 			.url(endpoint)
 			.post(payload.toString().toRequestBody(jsonMediaType))
 		val key = settings.readerTranslationApiKey.trim()
-		if (key.isNotBlank()) {
-			requestBuilder.header("Authorization", "Bearer $key")
-			requestBuilder.header("X-API-Key", key)
-		}
+		TranslationApiProviderCatalog.applyAuthentication(
+			requestBuilder,
+			settings.readerTranslationApiProviderPreset,
+			key,
+		)
 		applyCustomHeaders(requestBuilder)
 		val request = requestBuilder.build()
 		val response = okHttpClient.newCall(request).await()
@@ -675,6 +679,24 @@ internal class ReaderTranslationCoordinator(
 	private fun isOpenAiCompatibleChatCompletionsEndpoint(endpoint: String): Boolean {
 		val normalized = endpoint.lowercase()
 		return normalized.contains("/v1/chat/completions") || normalized.contains("/chat/completions")
+	}
+
+	private fun resolveTranslationApiEndpoint(): String {
+		val endpoint = settings.readerTranslationApiEndpoint.trim()
+		val preset = settings.readerTranslationApiProviderPreset.trim().uppercase()
+		return when {
+			preset == "DEEPSEEK" && isDeepSeekBaseEndpoint(endpoint) -> "https://api.deepseek.com/chat/completions"
+			preset == "OPENAI" && endpoint.trimEnd('/').equals("https://api.openai.com", ignoreCase = true) -> {
+				"https://api.openai.com/v1/chat/completions"
+			}
+			else -> endpoint
+		}
+	}
+
+	private fun isDeepSeekBaseEndpoint(endpoint: String): Boolean {
+		val normalized = endpoint.trim().trimEnd('/').lowercase()
+		return normalized == "https://api.deepseek.com" ||
+			normalized == "https://api.deepseek.com/v1"
 	}
 
 	private fun isDeepSeekEndpoint(endpoint: String): Boolean {

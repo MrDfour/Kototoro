@@ -1697,7 +1697,7 @@
     <string name="reader_translation_api_provider_anthropic">متوافق مع Anthropic OpenAI SDK (claude-sonnet-4-6)</string>
     <string name="reader_translation_api_provider_baidu">Baidu: ERNIE</string>
     <string name="reader_translation_api_provider_custom">مخصص (يدوي)</string>
-    <string name="reader_translation_api_provider_deepseek">DeepSeek: DeepSeek-V3 / R1</string>
+    <string name="reader_translation_api_provider_deepseek">DeepSeek: deepseek-v4-flash / deepseek-v4-pro</string>
     <string name="reader_translation_api_provider_gemini">متوافق مع Gemini OpenAI (gemini-3-flash-preview)</string>
     <string name="reader_translation_api_provider_minimax">MiniMax: M2.5</string>
     <string name="reader_translation_api_provider_moonshot">Moonshot AI: Kimi</string>
@@ -1778,8 +1778,8 @@
     <string name="reader_translation_ocr_pipeline_hybrid">هجين</string>
     <string name="reader_translation_ocr_pipeline_page_text_first">نص الصفحة أولاً</string>
     <string name="reader_translation_ocr_pipeline_strategy">استراتيجية خط أنابيب OCR</string>
-    <string name="reader_translation_ocr_rec_model_auto">تلقائي (اختيار حسب لغة المصدر)</string>
-    <string name="reader_translation_ocr_rec_model_auto_summary">يختار تلقائيًا أفضل أداة تعرف: اليابانية ← MangaOCR أو PP-OCRv5 Server، الإنجليزية ← PP-OCRv5 EN، الكورية ← PP-OCRv3 KO، الصينية/أخرى ← PP-OCRv5 Server أو Mobile</string>
+    <string name="reader_translation_ocr_rec_model_auto">تلقائي (اختيار حسب لغة المانغا)</string>
+    <string name="reader_translation_ocr_rec_model_auto_summary">يختار حسب لغة ترجمة المانغا أولاً ثم لغة المصدر: الكورية تستخدم PP-OCRv5 Korean، والتايلاندية PP-OCRv5 Thai، واللغات اللاتينية PP-OCRv5 Latin، واللغات الأخرى PP-OCRv6 Medium متعدد اللغات</string>
     <string name="reader_translation_ocr_recognizer_model_selection">نموذج التعرف على النص</string>
     <string name="reader_translation_ocr_recognizer_models_title">نماذج التعرف على النص</string>
     <string name="reader_translation_onnx_bubble_detector_models_title">نماذج كشف الفقاعات</string>

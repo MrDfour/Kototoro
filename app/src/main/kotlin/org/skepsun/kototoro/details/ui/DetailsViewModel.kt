@@ -52,6 +52,7 @@ import org.skepsun.kototoro.details.ui.model.EntityChapterSourceInfo
 import org.skepsun.kototoro.details.ui.model.toListItem
 import org.skepsun.kototoro.details.ui.model.LinkedTrackingItemUiModel
 import org.skepsun.kototoro.bookmarks.domain.BookmarksRepository
+import org.skepsun.kototoro.tracker.domain.TrackingRepository
 import org.skepsun.kototoro.core.model.ContentSource
 import org.skepsun.kototoro.core.model.ContentSourceInfo
 import org.skepsun.kototoro.core.model.getContentType
@@ -114,6 +115,7 @@ import org.skepsun.kototoro.parsers.util.ifNullOrEmpty
 import org.skepsun.kototoro.parsers.util.runCatchingCancellable
 import org.skepsun.kototoro.readingrecord.data.ReadingRecordRepository
 import org.skepsun.kototoro.readingrecord.data.ReadingRecordSnapshot
+import org.skepsun.kototoro.reader.ui.FULLY_READ_CHAPTER_ID
 import org.skepsun.kototoro.reader.ui.ReaderState
 import org.skepsun.kototoro.scrobbling.common.domain.Scrobbler
 import org.skepsun.kototoro.scrobbling.common.domain.tryScrobble
@@ -498,6 +500,7 @@ class DetailsViewModel @Inject constructor(
 	private val entityGraphRepository: org.skepsun.kototoro.entitygraph.data.EntityGraphRepository,
 	private val trackingSiteDiscoveryService: org.skepsun.kototoro.tracking.discovery.domain.TrackingSiteDiscoveryService,
 	private val sourceTypeIdentifier: SourceTypeIdentifier,
+	private val trackingRepository: TrackingRepository,
 	private val workResolver: org.skepsun.kototoro.work.domain.WorkResolver,
 ) : ChaptersPagesViewModel(
 	settings = settings,
@@ -2900,12 +2903,12 @@ class DetailsViewModel @Inject constructor(
 		selectedBranch,
 	) { details, h, branch ->
 		val chapter = details?.allChapters?.findChapterByHistory(h)
-		if (h != null && chapter != null) {
-			val isCompleted = h.percent >= 0.99999f
-			if (isCompleted && details != null) {
-				val branchChapters = details.allChapters
-					.filter { it.branch == branch }
-					.sortedBy { it.number }
+			if (h != null && chapter != null) {
+				val isCompleted = h.percent >= 0.99999f
+				if (isCompleted) {
+					val branchChapters = details.allChapters
+						.filter { it.branch == branch }
+						.sortedBy { it.number }
 				val index = branchChapters.indexOfFirst { it.id == chapter.id }
 				if (index != -1 && index + 1 < branchChapters.size) {
 					val nextChapter = branchChapters[index + 1]
@@ -2914,8 +2917,12 @@ class DetailsViewModel @Inject constructor(
 						page = 0,
 						scroll = 0,
 					)
-				} else {
-					ReaderState(h.copy(chapterId = chapter.id))
+					} else {
+						ReaderState(
+							chapterId = FULLY_READ_CHAPTER_ID,
+							page = 0,
+							scroll = 0,
+					)
 				}
 			} else {
 				ReaderState(h.copy(chapterId = chapter.id))
@@ -3049,9 +3056,10 @@ class DetailsViewModel @Inject constructor(
 		selectedBranch,
 		history,
 		interactor.observeIncognitoMode(manga),
-	) { m, b, h, im ->
+		isMergeRepeatedChapters,
+	) { m, b, h, im, mergeRepeated ->
 		val estimatedTime = readingTimeUseCase.invoke(m, b, h)
-		HistoryInfo(m, b, h, im == TriStateOption.ENABLED, estimatedTime)
+		HistoryInfo(m, b, h, im == TriStateOption.ENABLED, estimatedTime, mergeRepeated)
 	}.withErrorHandling()
 		.stateIn(
 			scope = viewModelScope + Dispatchers.Default,
@@ -5284,6 +5292,7 @@ class DetailsViewModel @Inject constructor(
 				)
 				baseLoadedDetails = finalDetails
 				syncDisplayedState()
+				trackingRepository.clearReadUpdates(finalDetails.id)
 				val localEntityId = entityGraphRepository.findEntityByBinding("0", finalDetails.id.toString())?.id
 					?: entityGraphRepository.findEntityByBinding("local_manga", finalDetails.id.toString())?.id
 				if (localEntityId != null && !isTrackingOriginSelectionPinned()) {
@@ -5460,6 +5469,12 @@ class DetailsViewModel @Inject constructor(
 				item
 			}
 		}
+	}
+
+	override suspend fun onDownloadComplete(downloadedContent: LocalContent?) {
+		super.onDownloadComplete(downloadedContent)
+		downloadedContent ?: return
+		baseLoadedDetails = interactor.updateLocal(baseLoadedDetails, downloadedContent)
 	}
 
 	fun translateTitleAndDescription(forceRefresh: Boolean = false) {

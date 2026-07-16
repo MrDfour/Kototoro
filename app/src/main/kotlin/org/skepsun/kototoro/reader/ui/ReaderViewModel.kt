@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -40,6 +41,8 @@ import org.skepsun.kototoro.core.os.AppShortcutManager
 import org.skepsun.kototoro.core.parser.ContentDataRepository
 import org.skepsun.kototoro.core.prefs.AppSettings
 import org.skepsun.kototoro.core.prefs.ReaderMode
+import org.skepsun.kototoro.core.prefs.ReaderTranslationMode
+import org.skepsun.kototoro.core.prefs.ReaderTranslationPipelineMode
 import org.skepsun.kototoro.core.prefs.TriStateOption
 import org.skepsun.kototoro.core.prefs.observeAsFlow
 import org.skepsun.kototoro.core.prefs.observeAsStateFlow
@@ -68,6 +71,11 @@ import org.skepsun.kototoro.parsers.util.sizeOrZero
 import org.skepsun.kototoro.readingrecord.data.ReadingRecordRepository
 import org.skepsun.kototoro.reader.domain.ChaptersLoader
 import org.skepsun.kototoro.reader.domain.DetectReaderModeUseCase
+import org.skepsun.kototoro.parsers.model.ContentChapter
+import org.skepsun.kototoro.core.model.getMergeKey
+import org.skepsun.kototoro.core.model.mergeRepeated
+import org.skepsun.kototoro.core.model.isManga
+import org.skepsun.kototoro.core.model.getContentType
 import org.skepsun.kototoro.reader.domain.PageLoader
 import org.skepsun.kototoro.reader.domain.ReaderPageEnhancementController
 import org.skepsun.kototoro.reader.domain.TranslationLayerState
@@ -259,6 +267,7 @@ class ReaderViewModel @Inject constructor(
         observeTranslationLayerState()
         observeTranslationDebugLogs()
         listenToDoublePageEvents()
+        observeMergeRepeatedChapters()
         loadImpl()
 		launchJob(Dispatchers.Default) {
 			val mangaId = manga.filterNotNull().first().id
@@ -432,6 +441,17 @@ class ReaderViewModel @Inject constructor(
         return !isTranslationBypassedForCurrentContent()
     }
 
+    fun hasTranslationEngineConfigured(): Boolean {
+        return when (settings.readerTranslationPipelineMode) {
+            ReaderTranslationPipelineMode.END_TO_END_API -> settings.readerE2eApiEndpoint.isNotBlank()
+            ReaderTranslationPipelineMode.TWO_STAGE -> when (settings.readerTranslationMode) {
+                ReaderTranslationMode.API_ONLY -> settings.readerTranslationApiEndpoint.isNotBlank()
+                ReaderTranslationMode.LOCAL_ONLY,
+                ReaderTranslationMode.LOCAL_FIRST -> true
+            }
+        }
+    }
+
     private fun resolveCurrentTranslationSourceLanguage(): String {
         return resolveReaderTranslationSourceLanguage(
             preferredLanguage = settings.readerTranslationSourceLanguage,
@@ -574,13 +594,20 @@ class ReaderViewModel @Inject constructor(
             prevJob?.cancelAndJoin()
             val prevState = readingState.requireValue()
             val newChapterId = if (delta != 0) {
-                val allChapters = mangaDetails.requireValue().allChapters
-                var index = allChapters.indexOfFirst { x -> x.id == prevState.chapterId }
+                val readingChapters = getReadingChapters()
+                var index = readingChapters.indexOfFirst { x -> x.id == prevState.chapterId }
+                if (index < 0 && isMergeRepeatedChapters.value) {
+                    val currentChapter = chaptersLoader.peekChapter(prevState.chapterId)
+                    if (currentChapter != null) {
+                        val currentKey = currentChapter.getMergeKey()
+                        index = readingChapters.indexOfFirst { it.getMergeKey() == currentKey }
+                    }
+                }
                 if (index < 0) {
                     return@launchLoadingJob
                 }
                 index += delta
-                (allChapters.getOrNull(index) ?: return@launchLoadingJob).id
+                (readingChapters.getOrNull(index) ?: return@launchLoadingJob).id
             } else {
                 prevState.chapterId
             }
@@ -769,6 +796,14 @@ class ReaderViewModel @Inject constructor(
                 detailsLoadUseCase(intent, force = false)
                     .collect { details ->
                         loadedDetails = details
+                        val translatedLanguage = savedStateHandle[ReaderIntent.EXTRA_TRANSLATED_LANGUAGE]
+                            ?: details.toContent().source.locale
+                        val sourceLanguage: String? = savedStateHandle[ReaderIntent.EXTRA_SOURCE_LANGUAGE]
+                        pageLoader.setTranslationLanguageContext(
+                            translatedLanguage = translatedLanguage,
+                            sourceLanguage = sourceLanguage,
+                            branch = selectedBranch.value ?: savedStateHandle[ReaderIntent.EXTRA_BRANCH],
+                        )
                         if (mangaDetails.value == null) {
                             mangaDetails.value = details
                         }
@@ -786,6 +821,11 @@ class ReaderViewModel @Inject constructor(
                             }.getOrDefault(settings.defaultReaderMode)
                             val branch = chaptersLoader.peekChapter(newState.chapterId)?.branch
                             selectedBranch.value = branch
+                            pageLoader.setTranslationLanguageContext(
+                                translatedLanguage = translatedLanguage,
+                                sourceLanguage = sourceLanguage,
+                                branch = branch,
+                            )
                             readerMode.value = mode
                             try {
                                 chaptersLoader.loadSingleChapter(newState.chapterId)
@@ -814,7 +854,7 @@ class ReaderViewModel @Inject constructor(
                                 }
                             }
                         }
-                        mangaDetails.value = details.filterChapters(selectedBranch.value)
+                        mangaDetails.value = details
 
                         // save state
                         if (isIncognitoMode.value == false) {
@@ -835,7 +875,7 @@ class ReaderViewModel @Inject constructor(
             if (readingState.value == null) {
                 val loadedContent = loadedDetails // for smart cast
                 if (loadedContent != null) {
-                    mangaDetails.value = loadedContent.filterChapters(selectedBranch.value)
+                    mangaDetails.value = loadedContent
                 }
                 val loadingError = when {
                     exception != null -> exception
@@ -951,12 +991,17 @@ class ReaderViewModel @Inject constructor(
         val state = getCurrentState() ?: return
         val chapter = chaptersLoader.peekChapter(state.chapterId) ?: return
         val m = mangaDetails.value ?: return
-        val chapterIndex = m.chapters[chapter.branch]?.indexOfFirst { it.id == chapter.id } ?: -1
+        val readingChapters = getReadingChapters()
+        var chapterIndex = readingChapters.indexOfFirst { it.id == chapter.id }
+        if (chapterIndex < 0 && isMergeRepeatedChapters.value) {
+            val currentKey = chapter.getMergeKey()
+            chapterIndex = readingChapters.indexOfFirst { it.getMergeKey() == currentKey }
+        }
         val newState = ReaderUiState(
             mangaName = m.toContent().title,
             chapter = chapter,
             chapterIndex = chapterIndex,
-            chaptersTotal = m.chapters[chapter.branch].sizeOrZero(),
+            chaptersTotal = readingChapters.size,
             totalPages = chaptersLoader.getPagesCount(chapter.id),
             currentPage = state.page,
             percent = computePercent(state.chapterId, state.page),
@@ -971,12 +1016,18 @@ class ReaderViewModel @Inject constructor(
     }
 
     private fun computePercent(chapterId: Long, pageIndex: Int): Float {
-        val branch = chaptersLoader.peekChapter(chapterId)?.branch
-        val chapters = mangaDetails.value?.chapters?.get(branch) ?: return PROGRESS_NONE
-        val chaptersCount = chapters.size
-        val chapterIndex = chapters.indexOfFirst { x -> x.id == chapterId }
+        val readingChapters = getReadingChapters()
+        val chaptersCount = readingChapters.size
+        var chapterIndex = readingChapters.indexOfFirst { x -> x.id == chapterId }
+        if (chapterIndex < 0 && isMergeRepeatedChapters.value) {
+            val currentChapter = chaptersLoader.peekChapter(chapterId)
+            if (currentChapter != null) {
+                val currentKey = currentChapter.getMergeKey()
+                chapterIndex = readingChapters.indexOfFirst { it.getMergeKey() == currentKey }
+            }
+        }
         val pagesCount = chaptersLoader.getPagesCount(chapterId)
-        if (chaptersCount == 0 || pagesCount == 0) {
+        if (chaptersCount == 0 || pagesCount == 0 || chapterIndex == -1) {
             return PROGRESS_NONE
         }
         val pagePercent = (pageIndex + 1) / pagesCount.toFloat()
@@ -1155,5 +1206,40 @@ class ReaderViewModel @Inject constructor(
     } else {
         other.addSuppressed(this)
         other
+    }
+
+    private fun observeMergeRepeatedChapters() {
+        launchJob(Dispatchers.Default) {
+            isMergeRepeatedChapters
+                .collect { useMerge ->
+                    val currentState = readingState.value ?: return@collect
+                    Log.d(LOG_TAG, "isMergeRepeatedChapters changed to $useMerge")
+                    
+                    // Keep only the current chapter's pages in memory, clearing any preloaded next/prev chapters
+                    chaptersLoader.keepOnlyChapter(currentState.chapterId)
+                    
+                    // Re-calculate UI state and content snapshot
+                    content.value = ReaderContent(getSplitPagesSnapshot(), currentState)
+                    notifyStateChanged()
+                }
+        }
+    }
+
+    private fun getReadingChapters(): List<ContentChapter> {
+        val details = mangaDetails.value ?: return emptyList()
+        val contentType = details.toContent().source.getContentType()
+        val useMerge = isMergeRepeatedChapters.value && contentType.isManga()
+        return if (useMerge) {
+            val allBranches = details.chapters.keys.toList()
+            val rawChapters = allBranches.flatMap { details.chapters[it].orEmpty() }
+            rawChapters.mergeRepeated()
+        } else {
+            val branch = selectedBranch.value
+            if (branch != null) {
+                details.chapters[branch].orEmpty()
+            } else {
+                details.allChapters
+            }
+        }
     }
 }

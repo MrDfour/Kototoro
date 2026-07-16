@@ -18,7 +18,6 @@ import org.skepsun.kototoro.R
 fun AISettingsScreen(
     onOpenOcrModels: () -> Unit,
     onOpenApiSettings: () -> Unit,
-    onOpenE2eApiSettings: () -> Unit,
     onOpenTranslationSettings: () -> Unit,
     onOpenImageEnhancementSettings: () -> Unit,
     onOpenTtsSettings: () -> Unit,
@@ -44,15 +43,11 @@ fun AISettingsScreen(
                     summary = stringResource(R.string.reader_translation_manage_ocr_models_summary),
                     onClick = onOpenOcrModels
                 )
+                SettingsSectionDivider()
                 SettingsActionPreference(
                     title = stringResource(R.string.ai_api_settings),
                     summary = stringResource(R.string.ai_api_settings_summary),
                     onClick = onOpenApiSettings
-                )
-                SettingsActionPreference(
-                    title = stringResource(R.string.reader_translation_e2e_api_settings_title),
-                    summary = stringResource(R.string.reader_translation_e2e_api_settings_summary),
-                    onClick = onOpenE2eApiSettings
                 )
             }
             

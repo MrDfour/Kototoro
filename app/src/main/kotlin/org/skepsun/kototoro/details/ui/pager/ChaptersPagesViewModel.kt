@@ -177,6 +177,7 @@ abstract class ChaptersPagesViewModel(
 						bookmarks = bookmarks,
 						isGrid = grid,
 						isDownloadedOnly = downloadedOnly,
+						shareProgressAcrossBranches = true,
 					)
 				}
 			} else {
@@ -478,7 +479,7 @@ abstract class ChaptersPagesViewModel(
 
 
 
-	private suspend fun onDownloadComplete(downloadedContent: LocalContent?) {
+	protected open suspend fun onDownloadComplete(downloadedContent: LocalContent?) {
 		downloadedContent ?: return
 		mangaDetails.update {
 			interactor.updateLocal(it, downloadedContent)

@@ -1,6 +1,7 @@
 package org.skepsun.kototoro.tracker.domain
 
 import org.skepsun.kototoro.core.db.entity.ChapterEntity
+import org.skepsun.kototoro.tracker.data.resolveTrackOwnerId
 import org.skepsun.kototoro.tracker.domain.model.ContentTracking
 import org.skepsun.kototoro.tracker.domain.model.TrackingLogItem
 import java.time.Instant
@@ -12,6 +13,7 @@ object TrackingLogItemMapper {
 	fun fromAllTrackedContent(
 		tracks: List<ContentTracking>,
 		chapters: List<ChapterEntity>,
+		unreadOwnerIds: Set<Long>? = null,
 	): List<TrackingLogItem> {
 		if (tracks.isEmpty()) {
 			return emptyList()
@@ -30,7 +32,11 @@ object TrackingLogItemMapper {
 				manga = track.manga,
 				chapters = chapterTitles,
 				createdAt = track.lastChapterDate ?: track.lastCheck ?: Instant.EPOCH,
-				isNew = track.newChapters > 0,
+				isNew = if (unreadOwnerIds != null) {
+					track.newChapters > 0 && resolveTrackOwnerId(track.entityId, track.manga.id) in unreadOwnerIds
+				} else {
+					track.newChapters > 0
+				},
 				count = track.newChapters,
 			)
 		}

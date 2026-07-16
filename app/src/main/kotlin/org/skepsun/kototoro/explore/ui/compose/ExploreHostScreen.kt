@@ -1,6 +1,7 @@
 package org.skepsun.kototoro.explore.ui.compose
 
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -66,6 +67,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -111,6 +113,7 @@ import org.skepsun.kototoro.core.ui.compose.compactPosterRailCardStyle
 import org.skepsun.kototoro.core.ui.compose.contentCoverSharedKey
 import org.skepsun.kototoro.core.ui.compose.HeroCoverSnapshotStore
 import org.skepsun.kototoro.core.ui.compose.logHeroTransition
+import org.skepsun.kototoro.core.ui.compose.performSelectionHapticFeedback
 import org.skepsun.kototoro.core.ui.compose.rememberHorizontalRailScrollIntensity
 import org.skepsun.kototoro.core.ui.compose.sharedCoverMemoryCacheKey
 import org.skepsun.kototoro.core.ui.compose.rememberVerticalRailScrollIntensity
@@ -299,6 +302,11 @@ fun KototoroExploreHostRoute(
     var heroPx by rememberSaveable { mutableIntStateOf(0) }
     val density = LocalDensity.current
     val context = LocalContext.current
+    LaunchedEffect(discoverViewModel, context) {
+        discoverViewModel.bangumiRecommendationLoadFailures.collect {
+            Toast.makeText(context, R.string.bangumi_recommendations_load_failed_hint, Toast.LENGTH_LONG).show()
+        }
+    }
     val configuration = LocalConfiguration.current
     val layoutDirection = LocalLayoutDirection.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -340,6 +348,7 @@ fun KototoroExploreHostRoute(
     }
 
     var selectedSourceIds by rememberSaveable { mutableStateOf(emptySet<Long>()) }
+    val hapticFeedback = LocalHapticFeedback.current
     val browseSourceItems = remember(sourceItems) {
         prepareBrowseSourceItems(sourceItems)
     }
@@ -750,6 +759,7 @@ fun KototoroExploreHostRoute(
                             selectedSourceIds = selectedSourceIds,
                             onSourceClick = { source ->
                                 if (selectedSourceIds.isNotEmpty()) {
+                                    hapticFeedback.performSelectionHapticFeedback()
                                     selectedSourceIds = selectedSourceIds.toggle(source.id)
                                 } else {
                                     onOpenSourceList?.invoke(source.source) ?: appRouter.openList(source.source, null, null)
@@ -778,6 +788,7 @@ fun KototoroExploreHostRoute(
                         onManageClick = appRouter::openManageSources,
                         onSourceClick = { source ->
                             if (selectedSourceIds.isNotEmpty()) {
+                                hapticFeedback.performSelectionHapticFeedback()
                                 selectedSourceIds = selectedSourceIds.toggle(source.id)
                             } else {
                                 onOpenSourceList?.invoke(source.source) ?: appRouter.openList(source.source, null, null)

@@ -32,6 +32,10 @@ import org.skepsun.kototoro.parsers.model.ContentType
 
 import org.skepsun.kototoro.core.model.unwrap
 import org.skepsun.kototoro.core.model.getContentType
+import org.skepsun.kototoro.parsers.model.ContentChapter
+import org.skepsun.kototoro.core.model.getMergeKey
+import org.skepsun.kototoro.core.model.mergeRepeated
+import org.skepsun.kototoro.core.model.isManga
 
 internal fun openDetailsReader(
 	context: Context,
@@ -48,6 +52,10 @@ internal fun openDetailsReader(
 
 	val intentBuilder = ReaderIntent.Builder(context)
 		.manga(manga)
+		.languages(
+			translatedLanguage = viewModel.resolvedReadingLanguage.value,
+			sourceLanguage = viewModel.resolvedMetadataLanguage.value,
+		)
 		.branch(viewModel.selectedBranchValue)
 
 	runCatching {
@@ -67,8 +75,24 @@ internal fun openDetailsReader(
 			intentBuilder.state(state)
 		} else if (history != null && !manga.chapters.isNullOrEmpty()) {
 			val preferredBranch = viewModel.selectedBranchValue
-			val chapters = manga.chapters?.filter { it.branch == preferredBranch } ?: manga.chapters
+			val useMerge = viewModel.isMergeRepeatedChapters.value && contentType.isManga()
+			val details = viewModel.mangaDetails.value
+			val chapters = if (useMerge && details != null) {
+				val allBranches = details.chapters.keys.toList()
+				val rawChapters = allBranches.flatMap { details.chapters[it].orEmpty() }
+				rawChapters.mergeRepeated()
+			} else {
+				manga.chapters?.filter { it.branch == preferredBranch } ?: manga.chapters
+			}
 			var matchedChapter = chapters?.find { it.id == history.chapterId }
+
+			if (matchedChapter == null && useMerge && details != null) {
+				val historyChapter = details.allChapters.find { it.id == history.chapterId }
+				if (historyChapter != null) {
+					val historyKey = historyChapter.getMergeKey()
+					matchedChapter = chapters?.find { it.getMergeKey() == historyKey }
+				}
+			}
 
 			if (matchedChapter == null) {
 				val potentialParentChapter = chapters?.find { it.id == history.chapterId }
@@ -111,7 +135,11 @@ internal fun openDetailsReader(
 							scroll = 0,
 						)
 					} else {
-						ReaderState(history.copy(chapterId = matchedChapter.id))
+						ReaderState(
+							chapterId = matchedChapter.id,
+							page = 0,
+							scroll = 0,
+						)
 					}
 				} else {
 					ReaderState(history.copy(chapterId = matchedChapter.id))

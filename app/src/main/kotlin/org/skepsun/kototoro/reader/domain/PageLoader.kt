@@ -121,6 +121,10 @@ class PageLoader @Inject constructor(
 	private var prefetchQueueLimit = settings.readerPrefetchLimit
 	private val edgeDetector = EdgeDetector(context)
 
+	fun setTranslationLanguageContext(translatedLanguage: String?, sourceLanguage: String?, branch: String?) {
+		enhancementController.setTranslationLanguageContext(translatedLanguage, sourceLanguage, branch)
+	}
+
 	private data class PageTaskRecord(
 		val task: ProgressDeferred<Uri, Float>,
 		val translationWorkSignature: String,
@@ -469,7 +473,7 @@ class PageLoader @Inject constructor(
 			Log.d("ReaderTranslate", "PageLoader debug: scheduling translation for page=${page.id} (show=${settings.isReaderTranslationShowTranslated})")
 			enhancementController.scheduleTranslation(
 				page = page,
-				sourceUri = displayUri,
+				sourceUri = preparedPage.translationSourceUri,
 				scope = loaderScope,
 			) {
 				synchronized(tasks) {

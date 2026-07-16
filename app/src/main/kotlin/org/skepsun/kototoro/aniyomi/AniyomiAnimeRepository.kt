@@ -1,10 +1,12 @@
 package org.skepsun.kototoro.aniyomi
 
+import eu.kanade.tachiyomi.animesource.AnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -13,6 +15,7 @@ import org.skepsun.kototoro.core.exceptions.CloudFlareException
 import org.skepsun.kototoro.core.exceptions.InteractiveActionRequiredException
 import org.skepsun.kototoro.core.cache.MemoryContentCache
 import org.skepsun.kototoro.core.parser.CachingContentRepository
+import org.skepsun.kototoro.core.parser.RelatedContentSearchFallback
 import org.skepsun.kototoro.aniyomi.model.AniyomiAnimeSource
 import org.skepsun.kototoro.aniyomi.model.getPublicAnimeUrl
 import org.skepsun.kototoro.aniyomi.model.toAniyomiAnime
@@ -196,7 +199,15 @@ class AniyomiAnimeRepository(
         fetchVideoList(sEpisode)
     }
     
-    override suspend fun getRelatedContentImpl(seed: Content): List<Content> = emptyList()
+    override suspend fun getRelatedContentImpl(seed: Content): List<Content> {
+        return RelatedContentSearchFallback.find(seed) { query ->
+            getList(
+                offset = 0,
+                order = defaultSortOrder,
+                filter = ContentListFilter(query = query),
+            )
+        }
+    }
     
     override suspend fun getPageUrl(page: ContentPage): String = withContext(Dispatchers.IO) {
         // For video, the URL is already the stream URL
@@ -249,7 +260,7 @@ class AniyomiAnimeRepository(
     private suspend fun fetchVideoList(sEpisode: SEpisode): List<Video> {
         return try {
             android.util.Log.d("AniyomiRepo", "Calling getVideoList...")
-            val result = aniyomiSource.getVideoList(sEpisode)
+            val result = aniyomiSource.getCompatibleVideoList(sEpisode)
             android.util.Log.d("AniyomiRepo", "getVideoList returned ${result.size} videos")
             result
         } catch (e: Exception) {
@@ -263,7 +274,7 @@ class AniyomiAnimeRepository(
             if (ioException != null) {
                 kotlinx.coroutines.delay(500)
                 try {
-                    aniyomiSource.getVideoList(sEpisode)
+                    aniyomiSource.getCompatibleVideoList(sEpisode)
                 } catch (retryError: Exception) {
                     rethrowAniyomiWrappedExceptions(retryError)
                     throw retryError
@@ -280,5 +291,44 @@ class AniyomiAnimeRepository(
             is InteractiveActionRequiredException -> throw cause
             is java.io.IOException -> throw cause
         }
+    }
+}
+
+internal suspend fun AnimeSource.getCompatibleVideoList(episode: SEpisode): List<Video> {
+    var legacyFailure: Throwable? = null
+    val legacyVideos = try {
+        getVideoList(episode)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        legacyFailure = e
+        emptyList()
+    }
+    if (legacyVideos.isNotEmpty()) {
+        return resolveVideos(legacyVideos)
+    }
+
+    val hosters = try {
+        getHosterList(episode)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Throwable) {
+        emptyList()
+    }
+    if (hosters.isNotEmpty()) {
+        val videos = hosters.flatMap { hoster ->
+            hoster.videoList ?: getVideoList(hoster)
+        }
+        return resolveVideos(videos)
+    }
+
+    legacyFailure?.let { throw it }
+    return emptyList()
+}
+
+private suspend fun AnimeSource.resolveVideos(videos: List<Video>): List<Video> {
+    val httpSource = this as? AnimeHttpSource ?: return videos
+    return videos.mapNotNull { video ->
+        if (video.initialized) video else httpSource.resolveVideo(video)
     }
 }

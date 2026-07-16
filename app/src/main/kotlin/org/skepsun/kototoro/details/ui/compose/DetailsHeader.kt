@@ -1,6 +1,7 @@
 package org.skepsun.kototoro.details.ui.compose
 
 import android.text.format.Formatter
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -40,9 +41,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -65,7 +66,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -79,10 +79,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
@@ -189,9 +191,6 @@ fun DetailsHeader(
     translatedTitle: String?,
     translatedDescription: String?,
     isShowingTranslation: Boolean,
-    hasTranslationCache: Boolean,
-    isTranslating: Boolean,
-    showTranslateAction: Boolean,
     settings: AppSettings,
     collapseProgressProvider: () -> Float,
     coverVisualAlpha: Float,
@@ -202,24 +201,15 @@ fun DetailsHeader(
     onInfoCardBoundsSync: (Float, Float) -> Unit,
     onCoverClick: (String?) -> Unit,
     onFavoriteClick: () -> Unit,
-    onReadingRecordClick: () -> Unit,
-    onCommentsClick: () -> Unit,
-    onReviewsClick: () -> Unit,
-    onSelectActiveLocalSource: (Long) -> Unit,
-    onSelectMetadataSource: (DetailsSourceOption) -> Unit,
     onSourceClick: (ContentSource) -> Unit,
     onTrackingSourceClick: (DetailsSourceOption) -> Unit,
     onOpenTrackingDiscover: (ScrobblerService) -> Unit,
     onOpenMetadataSourceSheet: () -> Unit,
     onOpenReadingSourceSheet: () -> Unit,
+    onOpenChapters: () -> Unit,
     onOpenSupplementalAction: (DetailsSupplementAction) -> Unit,
     onAuthorClick: (String) -> Unit,
     onTagClick: (ContentTag) -> Unit,
-    onTranslateClick: () -> Unit,
-    onTranslateLongClick: () -> Unit,
-    onToggleTranslationClick: () -> Unit,
-    showCommentsAction: Boolean,
-    showReviewsAction: Boolean,
     onOpenLinkedTracking: (LinkedTrackingItemUiModel) -> Unit,
     onManageLinkedTracking: (LinkedTrackingItemUiModel) -> Unit,
     onUpdateLinkedTrackingStatus: (LinkedTrackingItemUiModel, ScrobblingStatus) -> Unit,
@@ -239,10 +229,9 @@ fun DetailsHeader(
     val fallbackDescription = stringResource(R.string.no_description)
     val scrobblingStatuses = stringArrayResource(R.array.scrobbling_statuses)
     val defaultLocale = Locale.getDefault()
-    val author = content?.authors
-        ?.firstOrNull()
-        ?.takeUnless { it.isBlank() }
-        ?: stringResource(R.string.unknown_author)
+    val primaryAuthor = content?.authors?.firstOrNull { it.isNotBlank() }
+    val author = primaryAuthor ?: stringResource(R.string.unknown_author)
+    val hasKnownAuthor = primaryAuthor != null
     val originalLanguage = metadataLanguageCode
         ?.toLocaleOrNull()
         ?.getDisplayName(defaultLocale)
@@ -253,6 +242,12 @@ fun DetailsHeader(
         ?.getDisplayName(defaultLocale)
         ?.replaceFirstChar { if (it.isLowerCase()) it.titlecase(defaultLocale) else it.toString() }
         .orEmpty()
+    val languageSummary = when {
+        originalLanguage.isBlank() && readingLanguage.isBlank() -> stringResource(R.string.unknown)
+        originalLanguage.isBlank() -> readingLanguage
+        readingLanguage.isBlank() || readingLanguage == originalLanguage -> originalLanguage
+        else -> "$originalLanguage -> $readingLanguage"
+    }
     val chapterProgressLabel = when {
         historyInfo.totalChapters > 0 && historyInfo.currentChapter >= 0 -> "${historyInfo.currentChapter + 1}/${historyInfo.totalChapters}"
         historyInfo.totalChapters > 0 -> "0/${historyInfo.totalChapters}"
@@ -293,8 +288,6 @@ fun DetailsHeader(
     }
     val metadataSourceOption = metadataSourceOptions.firstOrNull { it.isSelected } ?: metadataSourceOptions.firstOrNull()
     val readingSourceOption = readingSourceOptions.firstOrNull { it.isSelected } ?: readingSourceOptions.firstOrNull()
-    val commentsLabel = stringResource(R.string.details_comments)
-    val reviewsLabel = stringResource(R.string.details_reviews)
     val visibleTrackingSuggestion = trackingSuggestion?.takeUnless { suggestion ->
         linkedTrackingItems.any { linked ->
             linked.service == suggestion.service && linked.remoteId == suggestion.remoteId
@@ -310,6 +303,38 @@ fun DetailsHeader(
         ContentType.HENTAI_VIDEO -> R.string.details_playback_language_short
         else -> R.string.details_reading_language_short
     }
+    val metadataDisplayModel = metadataSourceOption?.resolveDisplayModel(
+        role = DetailsSourceRole.ENTITY_METADATA,
+        currentContent = content,
+        linkedTrackingItem = metadataSourceOption.trackingService?.let { service ->
+            linkedTrackingItems.firstOrNull {
+                it.service == service && it.remoteId == metadataSourceOption.remoteId
+            }
+        },
+        strings = DetailsSourceDisplayStrings(
+            unavailableText = stringResource(R.string.details_metadata_binding_unavailable),
+            metadataBindingLabel = stringResource(R.string.details_entity_metadata_binding),
+            currentProjectionLabel = stringResource(R.string.details_current_projection),
+            switchableProjectionLabel = stringResource(R.string.details_switchable_projection),
+        ),
+        isSelected = true,
+    )
+    val readingDisplayModel = if (showWorkActions) {
+        readingSourceOption?.resolveDisplayModel(
+            role = DetailsSourceRole.READING_PROJECTION,
+            currentContent = content,
+            linkedTrackingItem = null,
+            strings = DetailsSourceDisplayStrings(
+                unavailableText = stringResource(R.string.details_reading_source_unavailable),
+                metadataBindingLabel = stringResource(R.string.details_entity_metadata_binding),
+                currentProjectionLabel = stringResource(readingSourceLabelRes),
+                switchableProjectionLabel = stringResource(R.string.details_switchable_projection),
+            ),
+            isSelected = true,
+        )
+    } else {
+        null
+    }
 
     val normalizedCoverUrl = coverUrl?.takeIfUsableImageUri()
     val normalizedFallbackCoverUrl = fallbackCoverUrl?.takeIfUsableImageUri()
@@ -321,8 +346,11 @@ fun DetailsHeader(
     }
 
     var isDescriptionExpanded by remember(settings.isDescriptionExpanded) { mutableStateOf(settings.isDescriptionExpanded) }
+    var isTitleExpanded by rememberSaveable(displayTitle) { mutableStateOf(false) }
+    var canExpandTitle by remember(displayTitle) { mutableStateOf(false) }
     val description = displayDescription.ifBlank { fallbackDescription }
-    val canExpandDescription = description.length > 200
+    val collapsedDescriptionMaxLines = 3
+    var canExpandDescription by remember(description) { mutableStateOf(false) }
 
     val coverModel = remember(content?.source?.name, content?.url, currentCoverUrl) {
         when {
@@ -365,8 +393,9 @@ fun DetailsHeader(
                     label = stringResource(R.string.author),
                     value = author,
                     iconRes = R.drawable.ic_info_outline,
-                    onClick = if (it.authors.isNotEmpty()) {
-                        { onAuthorClick(it.authors.first()) }
+                    valueMuted = !hasKnownAuthor,
+                    onClick = if (primaryAuthor != null) {
+                        { onAuthorClick(primaryAuthor) }
                     } else {
                         null
                     },
@@ -378,20 +407,15 @@ fun DetailsHeader(
                 label = stringResource(R.string.state),
                 value = state?.let { stringResource(it.titleResId) } ?: stringResource(R.string.unknown),
                 iconRes = state?.iconResId ?: R.drawable.ic_info_outline,
-            ),
-        )
-        add(
-            DetailsInfoItem(
-                label = stringResource(R.string.details_original_language_short),
-                value = originalLanguage.ifBlank { stringResource(R.string.unknown) },
-                iconRes = R.drawable.ic_language,
+                valueMuted = state == null,
             ),
         )
         add(
             DetailsInfoItem(
                 label = stringResource(readingLanguageLabelRes),
-                value = readingLanguage.ifBlank { stringResource(R.string.unknown) },
+                value = languageSummary,
                 iconRes = R.drawable.ic_language,
+                valueMuted = originalLanguage.isBlank() && readingLanguage.isBlank(),
             ),
         )
         add(
@@ -399,6 +423,8 @@ fun DetailsHeader(
                 label = stringResource(R.string.chapters),
                 value = chapterProgressLabel,
                 iconRes = R.drawable.ic_book_page,
+                onClick = onOpenChapters,
+                showNavigationIndicator = true,
             ),
         )
         if (localContent != null) {
@@ -415,8 +441,8 @@ fun DetailsHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -453,16 +479,47 @@ fun DetailsHeader(
                         val textCollapseProgress = ((collapseProgressProvider() - 0.08f) / 0.44f).coerceIn(0f, 1f)
                         alpha = 1f - textCollapseProgress
                     },
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                SelectionContainer {
+                SelectionContainer(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = displayTitle,
                         style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            lineHeight = 28.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            lineHeight = 27.sp,
                         ),
                         color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .animateContentSize()
+                            .graphicsLayer {
+                                compositingStrategy = CompositingStrategy.Offscreen
+                            }
+                            .drawWithContent {
+                                drawContent()
+                                if (canExpandTitle && !isTitleExpanded) {
+                                    drawRect(
+                                        brush = Brush.verticalGradient(
+                                            colors = listOf(Color.Black, Color.Transparent),
+                                            startY = size.height * 0.62f,
+                                            endY = size.height,
+                                        ),
+                                        blendMode = BlendMode.DstIn,
+                                    )
+                                }
+                            }
+                            .clickable(enabled = canExpandTitle) {
+                                isTitleExpanded = !isTitleExpanded
+                            },
+                        maxLines = if (isTitleExpanded) Int.MAX_VALUE else 3,
+                        overflow = TextOverflow.Ellipsis,
+                        onTextLayout = { textLayoutResult ->
+                            val hasCollapsedOverflow = textLayoutResult.hasVisualOverflow ||
+                                textLayoutResult.lineCount > 3
+                            if (canExpandTitle != hasCollapsedOverflow) {
+                                canExpandTitle = hasCollapsedOverflow
+                            }
+                        },
                     )
                 }
                 if (alternateTitlesText.isNotEmpty()) {
@@ -472,6 +529,26 @@ fun DetailsHeader(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (metadataDisplayModel != null || readingDisplayModel != null) {
+                    DetailsSourceSummaryRow(
+                        metadataDisplayModel = metadataDisplayModel,
+                        readingDisplayModel = readingDisplayModel,
+                        onMetadataIconClick = {
+                            when {
+                                metadataSourceOption?.source != null -> onSourceClick(metadataSourceOption.source)
+                                metadataSourceOption?.trackingService != null -> onTrackingSourceClick(metadataSourceOption)
+                            }
+                        },
+                        onMetadataNameClick = onOpenMetadataSourceSheet,
+                        onReadingIconClick = {
+                            when {
+                                readingSourceOption?.source != null -> onSourceClick(readingSourceOption.source)
+                                readingSourceOption?.trackingService != null -> onTrackingSourceClick(readingSourceOption)
+                            }
+                        },
+                        onReadingNameClick = onOpenReadingSourceSheet,
                     )
                 }
                 if (supplementalActions.isNotEmpty()) {
@@ -501,61 +578,34 @@ fun DetailsHeader(
                             alpha = 1f - actionsCollapseProgress
                         }
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (showWorkActions) {
                         DetailsHeaderIconButton(
                             iconRes = if (isFavourite) R.drawable.ic_heart else R.drawable.ic_heart_outline,
                             onClick = onFavoriteClick,
                             filled = isFavourite,
-                        )
-                        DetailsHeaderIconButton(
-                            iconRes = R.drawable.ic_timeline,
-                            onClick = onReadingRecordClick,
-                            onLongClick = {
-                                Toast.makeText(context, R.string.reading_record, Toast.LENGTH_SHORT).show()
-                            },
+                            buttonSize = 32.dp,
+                            iconSize = 17.dp,
                         )
                     }
-                    if (showCommentsAction) {
-                        DetailsHeaderIconButton(
-                            iconRes = R.drawable.ic_comment,
-                            onClick = onCommentsClick,
-                            onLongClick = {
-                                Toast.makeText(context, commentsLabel, Toast.LENGTH_SHORT).show()
-                            },
-                        )
-                    }
-                    if (showReviewsAction) {
-                        DetailsHeaderIconButton(
-                            iconRes = R.drawable.ic_book_page,
-                            onClick = onReviewsClick,
-                            onLongClick = {
-                                Toast.makeText(context, reviewsLabel, Toast.LENGTH_SHORT).show()
-                            },
-                        )
-                    }
-                    if (showTranslateAction) {
-                        DetailsHeaderIconButton(
-                            iconRes = R.drawable.ic_translate,
-                            onClick = {
-                                if (hasTranslationCache) {
-                                    onToggleTranslationClick()
-                                } else {
-                                    onTranslateClick()
-                                }
-                            },
-                            onLongClick = onTranslateLongClick,
-                            enabled = !isTranslating,
+                    if (showWorkActions) {
+                        RatingStatusChip(
+                            rating = unifiedRating,
+                            canEditRating = canEditUnifiedRating,
+                            status = readingStatus,
+                            scrobblingStatuses = scrobblingStatuses,
+                            linkedTrackingItems = linkedTrackingItems,
+                            onUpdateRating = onUpdateUnifiedRating,
+                            onUpdateStatus = onUpdateReadingStatus,
                         )
                     }
                 }
             }
         }
 
-        val showInfoCard = metadataSourceOptions.isNotEmpty() ||
-            (showWorkActions && readingSourceOptions.isNotEmpty()) ||
-            infoItems.isNotEmpty()
+        val showProgress = historyInfo.history != null && historyInfo.percent > 0f
+        val showInfoCard = infoItems.isNotEmpty() || showProgress
         if (showInfoCard) {
             DetailsInfoPanelSurface(
                 modifier = Modifier
@@ -567,134 +617,58 @@ fun DetailsHeader(
             ) {
                 Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                        .fillMaxWidth(),
                 ) {
-                    if (metadataSourceOptions.isNotEmpty() || (showWorkActions && readingSourceOptions.isNotEmpty())) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            if (metadataSourceOptions.isNotEmpty()) {
-                                DetailsSourceSelectorButton(
-                                    label = stringResource(R.string.details_entity_metadata),
-                                    currentDisplayModel = metadataSourceOption?.resolveDisplayModel(
-                                        role = DetailsSourceRole.ENTITY_METADATA,
-                                        currentContent = content,
-                                        linkedTrackingItem = metadataSourceOption.trackingService?.let { service ->
-                                            linkedTrackingItems.firstOrNull {
-                                                it.service == service && it.remoteId == metadataSourceOption.remoteId
-                                            }
-                                        },
-                                        strings = DetailsSourceDisplayStrings(
-                                            unavailableText = stringResource(R.string.details_metadata_binding_unavailable),
-                                            metadataBindingLabel = stringResource(R.string.details_entity_metadata_binding),
-                                            currentProjectionLabel = stringResource(R.string.details_current_projection),
-                                            switchableProjectionLabel = stringResource(R.string.details_switchable_projection),
-                                        ),
-                                        isSelected = true,
-                                    ),
-                                    onPrimaryClick = {
-                                        when {
-                                            metadataSourceOption?.source != null -> onSourceClick(metadataSourceOption.source)
-                                            metadataSourceOption?.trackingService != null -> onTrackingSourceClick(metadataSourceOption)
-                                        }
-                                    },
-                                    isMenuEnabled = true,
-                                    onMenuClick = onOpenMetadataSourceSheet,
-                                    modifier = Modifier.weight(1f),
-                                )
-                            } else {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
-                            if (showWorkActions) {
-                                DetailsSourceSelectorButton(
-                                    label = stringResource(R.string.details_current_projection),
-                                    currentDisplayModel = readingSourceOption?.resolveDisplayModel(
-                                        role = DetailsSourceRole.READING_PROJECTION,
-                                        currentContent = content,
-                                        linkedTrackingItem = null,
-                                        strings = DetailsSourceDisplayStrings(
-                                            unavailableText = stringResource(R.string.details_reading_source_unavailable),
-                                            metadataBindingLabel = stringResource(R.string.details_entity_metadata_binding),
-                                            currentProjectionLabel = stringResource(readingSourceLabelRes),
-                                            switchableProjectionLabel = stringResource(R.string.details_switchable_projection),
-                                        ),
-                                        isSelected = true,
-                                    ),
-                                    onPrimaryClick = {
-                                        when {
-                                            readingSourceOption?.source != null -> onSourceClick(readingSourceOption.source)
-                                            readingSourceOption?.trackingService != null -> onTrackingSourceClick(readingSourceOption)
-                                        }
-                                    },
-                                    isMenuEnabled = true,
-                                    onMenuClick = onOpenReadingSourceSheet,
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                        }
-                    }
-                    if (showWorkActions) {
-                        UnifiedTrackingRow(
-                            rating = unifiedRating,
-                            canEditRating = canEditUnifiedRating,
-                            status = readingStatus,
-                            scrobblingStatuses = scrobblingStatuses,
-                            linkedTrackingItems = linkedTrackingItems,
-                            onUpdateRating = onUpdateUnifiedRating,
-                            onUpdateStatus = onUpdateReadingStatus,
-                        )
-                    }
                     if (infoItems.isNotEmpty()) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                        )
-                        infoItems.chunked(2).forEach { rowItems ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                rowItems.forEach { item ->
-                                    MetadataItem(
-                                        label = item.label,
-                                        value = item.value,
-                                        iconRes = item.iconRes,
-                                        modifier = Modifier.weight(1f),
-                                        onClick = item.onClick,
-                                    )
-                                }
-                                if (rowItems.size == 1) {
-                                    Spacer(modifier = Modifier.weight(1f))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                            verticalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            infoItems.chunked(2).forEach { rowItems ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    rowItems.forEach { item ->
+                                        MetadataItem(
+                                            label = item.label,
+                                            value = item.value,
+                                            iconRes = item.iconRes,
+                                            modifier = Modifier.weight(1f),
+                                            valueMuted = item.valueMuted,
+                                            onClick = item.onClick,
+                                            showNavigationIndicator = item.showNavigationIndicator,
+                                        )
+                                    }
+                                    if (rowItems.size == 1) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
                                 }
                             }
                         }
                     }
-                    // Reading progress bar at bottom of info card
-                    if (historyInfo.history != null && historyInfo.percent > 0f) {
-                        val progressPercent = (historyInfo.percent * 100f).roundToInt()
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                        )
+                    if (showProgress) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 12.dp, end = 12.dp, top = if (infoItems.isNotEmpty()) 0.dp else 8.dp, bottom = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             KototoroLinearProgressIndicator(
                                 progress = { historyInfo.percent.coerceIn(0f, 1f) },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(8.dp)
+                                    .height(3.dp)
                                     .clip(RoundedCornerShape(999.dp)),
                             )
                             Text(
-                                text = "$progressPercent%",
+                                text = progressLabel,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
                             )
                         }
                     }
@@ -715,12 +689,10 @@ fun DetailsHeader(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val expressive = LocalMaterialExpressiveComponentsEnabled.current
-            val expressiveContainerColors = rememberGlassSurfaceColors(style = GlassDefaults.subtleStyle())
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
                     text = stringResource(R.string.description),
@@ -728,69 +700,53 @@ fun DetailsHeader(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 if (canExpandDescription) {
-                    if (expressive) {
-                        Surface(
-                            shape = RoundedCornerShape(999.dp),
-                            color = expressiveContainerColors.containerColor.detailsButtonContainerColor(),
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            tonalElevation = 0.dp,
-                            shadowElevation = 0.dp,
-                            border = expressiveContainerColors.border,
-                        ) {
-                            Text(
-                                text = if (isDescriptionExpanded) stringResource(R.string.show_less) else stringResource(R.string.show_more),
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier
-                                    .clickable { isDescriptionExpanded = !isDescriptionExpanded }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                            )
-                        }
-                    } else {
+                    TextButton(
+                        onClick = { isDescriptionExpanded = !isDescriptionExpanded },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                    ) {
                         Text(
-                            text = if (isDescriptionExpanded) stringResource(R.string.show_less) else stringResource(R.string.show_more),
+                            text = if (isDescriptionExpanded) {
+                                stringResource(R.string.show_less)
+                            } else {
+                                stringResource(R.string.show_more)
+                            },
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.clickable { isDescriptionExpanded = !isDescriptionExpanded },
+                        )
+                        Icon(
+                            imageVector = if (isDescriptionExpanded) {
+                                Icons.Filled.KeyboardArrowUp
+                            } else {
+                                Icons.Filled.KeyboardArrowDown
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
                         )
                     }
                 }
             }
-            val descriptionContent: @Composable () -> Unit = {
-                SelectionContainer {
-                    Text(
-                        text = description,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { if (canExpandDescription) isDescriptionExpanded = !isDescriptionExpanded },
-                        maxLines = if (isDescriptionExpanded) Int.MAX_VALUE else 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            if (expressive) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(24.dp),
-                    color = expressiveContainerColors.containerColor.detailsPanelContainerColor(),
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    border = expressiveContainerColors.border,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 0.dp,
-                ) {
-                    Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-                        descriptionContent()
-                    }
-                }
-            } else {
-                descriptionContent()
+            SelectionContainer {
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize()
+                        .clickable { if (canExpandDescription) isDescriptionExpanded = !isDescriptionExpanded },
+                    maxLines = if (isDescriptionExpanded) Int.MAX_VALUE else collapsedDescriptionMaxLines,
+                    overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { textLayoutResult ->
+                        val hasCollapsedOverflow = textLayoutResult.hasVisualOverflow ||
+                            textLayoutResult.lineCount > collapsedDescriptionMaxLines
+                        if (canExpandDescription != hasCollapsedOverflow) {
+                            canExpandDescription = hasCollapsedOverflow
+                        }
+                    },
+                )
             }
         }
 
         if (!content?.tags.isNullOrEmpty()) {
-            val expressive = LocalMaterialExpressiveComponentsEnabled.current
-            val expressiveChipColors = rememberGlassSurfaceColors(style = GlassDefaults.subtleStyle())
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 24.dp) {
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     FlowRow(
@@ -803,7 +759,7 @@ fun DetailsHeader(
                             SuggestionChip(
                                 onClick = { onTagClick(tag) },
                                 modifier = Modifier.heightIn(min = 24.dp),
-                                shape = RoundedCornerShape(if (expressive) 999.dp else 8.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 label = {
                                     Text(
                                         text = tag.title,
@@ -815,8 +771,6 @@ fun DetailsHeader(
                                 colors = SuggestionChipDefaults.suggestionChipColors(
                                     containerColor = if (isSensitiveTag) {
                                         Color(0xFFE3B341).copy(alpha = 0.22f)
-                                    } else if (expressive) {
-                                        expressiveChipColors.containerColor.detailsButtonContainerColor()
                                     } else {
                                         MaterialTheme.colorScheme.surface.copy(alpha = 0.48f)
                                     },
@@ -830,10 +784,6 @@ fun DetailsHeader(
                                     enabled = true,
                                     borderColor = if (isSensitiveTag) {
                                         Color(0xFFE3B341).copy(alpha = 0.68f)
-                                    } else if (expressive) {
-                                        MaterialTheme.colorScheme.outlineVariant.copy(
-                                            alpha = expressiveChipColors.containerColor.alpha.coerceAtMost(0.42f),
-                                        )
                                     } else {
                                         MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                                     },
@@ -862,6 +812,129 @@ private fun DetailsInfoPanelSurface(
         shape = RoundedCornerShape(if (expressive) 28.dp else 24.dp),
     ) {
         content()
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DetailsSourceSummaryRow(
+    metadataDisplayModel: SourceOptionDisplayModel?,
+    readingDisplayModel: SourceOptionDisplayModel?,
+    onMetadataIconClick: () -> Unit,
+    onMetadataNameClick: () -> Unit,
+    onReadingIconClick: () -> Unit,
+    onReadingNameClick: () -> Unit,
+) {
+    val metadataTitle = metadataDisplayModel?.selectorTitle.orEmpty()
+    val readingTitle = readingDisplayModel?.selectorTitle.orEmpty()
+    val metadataFallback = stringResource(R.string.details_metadata_binding_unavailable)
+    val readingFallback = stringResource(R.string.details_reading_source_unavailable)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(999.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.36f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.26f)),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SourceSummarySegment(
+                label = metadataTitle,
+                fallbackLabel = metadataFallback,
+                displayModel = metadataDisplayModel,
+                color = MaterialTheme.colorScheme.primary,
+                onIconClick = onMetadataIconClick,
+                onNameClick = onMetadataNameClick,
+                modifier = Modifier.weight(1f),
+            )
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(24.dp)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.30f)),
+            )
+            SourceSummarySegment(
+                label = readingTitle,
+                fallbackLabel = readingFallback,
+                displayModel = readingDisplayModel,
+                color = MaterialTheme.colorScheme.tertiary,
+                onIconClick = onReadingIconClick,
+                onNameClick = onReadingNameClick,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SourceSummarySegment(
+    label: String,
+    fallbackLabel: String,
+    displayModel: SourceOptionDisplayModel?,
+    color: Color,
+    onIconClick: () -> Unit,
+    onNameClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val hasResolvedSource = displayModel != null
+    Row(
+        modifier = modifier
+            .background(color.copy(alpha = if (hasResolvedSource) 0.18f else 0.10f))
+            .padding(start = 6.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .clickable(onClick = if (hasResolvedSource) onIconClick else onNameClick)
+                .padding(3.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            SourceSummaryIcon(displayModel = displayModel)
+        }
+        Text(
+            text = label.ifBlank { fallbackLabel },
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onNameClick),
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (hasResolvedSource) 1f else 0.68f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun SourceSummaryIcon(
+    displayModel: SourceOptionDisplayModel?,
+) {
+    when {
+        displayModel?.source != null -> {
+            ContentSourceIcon(
+                source = displayModel.source,
+                modifier = Modifier.size(14.dp),
+                contentDescription = null,
+            )
+        }
+        displayModel?.trackingService != null -> {
+            Icon(
+                painter = rememberSafePainter(displayModel.trackingService.iconResId),
+                contentDescription = null,
+                tint = Color.Unspecified,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+        else -> {
+            Icon(
+                painter = painterResource(R.drawable.ic_manga_source),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(14.dp),
+            )
+        }
     }
 }
 
@@ -987,7 +1060,7 @@ private fun TrackingSuggestionCard(
 }
 
 @Composable
-private fun UnifiedTrackingRow(
+private fun RatingStatusChip(
     rating: Float,
     canEditRating: Boolean,
     status: ScrobblingStatus,
@@ -996,7 +1069,6 @@ private fun UnifiedTrackingRow(
     onUpdateRating: (Float) -> Unit,
     onUpdateStatus: (ScrobblingStatus) -> Unit,
 ) {
-    val context = LocalContext.current
     var expanded by remember(status, linkedTrackingItems) { mutableStateOf(false) }
     val supportedStatuses = remember(linkedTrackingItems) {
         linkedTrackingItems
@@ -1006,190 +1078,156 @@ private fun UnifiedTrackingRow(
             ?.toList()
             ?: ScrobblingStatus.entries
     }
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    Box {
+        Surface(
+            modifier = Modifier.height(32.dp),
+            shape = RoundedCornerShape(999.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)),
         ) {
-            UnifiedRatingBar(
-                modifier = Modifier.weight(1f),
-                rating = rating,
-                enabled = canEditRating,
-                onRatingChanged = onUpdateRating,
-                onDisabledClick = {
-                    Toast.makeText(
-                        context,
-                        R.string.details_rating_requires_tracking,
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                },
-            )
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                SuggestionChip(
-                    onClick = { expanded = true },
-                    label = {
-                        Text(
-                            text = scrobblingStatuses.getOrElse(status.ordinal) { status.name },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    icon = {
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                        )
-                    },
-                    colors = SuggestionChipDefaults.suggestionChipColors(
-                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                        labelColor = MaterialTheme.colorScheme.onSurface,
-                        iconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
+            Row(
+                modifier = Modifier.padding(start = 8.dp, end = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CompactRatingChip(
+                    rating = rating,
+                    enabled = canEditRating,
+                    onRatingChanged = onUpdateRating,
                 )
-                GlassDropdownMenu(
-                    expanded = expanded,
-                    onDismissRequest = { expanded = false },
-                    shape = RoundedCornerShape(28.dp),
-                    style = GlassDefaults.subtleStyle(),
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(18.dp)
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.24f)),
+                )
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable { expanded = true }
+                        .padding(horizontal = 2.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    supportedStatuses.forEach { candidate ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = scrobblingStatuses.getOrElse(candidate.ordinal) { candidate.name },
-                                )
-                            },
-                            onClick = {
-                                expanded = false
-                                onUpdateStatus(candidate)
-                            },
-                            leadingIcon = if (status == candidate) {
-                                {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = null,
-                                    )
-                                }
-                            } else {
-                                null
-                            },
-                        )
-                    }
+                    Text(
+                        text = scrobblingStatuses.getOrElse(status.ordinal) { status.name },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
+            }
+        }
+        GlassDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(28.dp),
+            style = GlassDefaults.subtleStyle(),
+        ) {
+            supportedStatuses.forEach { candidate ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = scrobblingStatuses.getOrElse(candidate.ordinal) { candidate.name },
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onUpdateStatus(candidate)
+                    },
+                    leadingIcon = if (status == candidate) {
+                        {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun UnifiedRatingBar(
-    modifier: Modifier = Modifier,
+private fun CompactRatingChip(
     rating: Float,
     enabled: Boolean,
     onRatingChanged: (Float) -> Unit,
-    onDisabledClick: () -> Unit,
 ) {
     val context = LocalContext.current
-    var displayStars by remember { mutableFloatStateOf((rating.coerceIn(0f, 1f) * 5f).coerceIn(0f, 5f)) }
-    LaunchedEffect(rating) {
-        displayStars = (rating.coerceIn(0f, 1f) * 5f).coerceIn(0f, 5f)
-    }
-    val label = remember(displayStars) {
-        val score = (displayStars * 2f).roundToInt()
-        if (score <= 0) {
-            "0"
-        } else {
-            score.toString()
-        }
-    }
-    Row(
-        modifier = modifier.clickable(
-            interactionSource = remember { MutableInteractionSource() },
-            indication = null,
-            enabled = !enabled,
-            onClick = onDisabledClick,
-        ),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    var expanded by remember { mutableStateOf(false) }
+    val score = (rating.coerceIn(0f, 1f) * 10f).roundToInt()
+    val contentAlpha = if (score > 0) 1f else 0.62f
+    Box {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            repeat(5) { index ->
-                val starIndex = index + 1
-                val fraction = (displayStars - index).coerceIn(0f, 1f)
-                Box(
-                    modifier = Modifier
-                        .size(20.dp)
-                        .then(
-                            if (enabled) {
-                                Modifier.clickable {
-                                    displayStars = resolveCyclicRatingSelection(
-                                        currentStars = displayStars,
-                                        tappedStarIndex = starIndex,
-                                    )
-                                    onRatingChanged((displayStars / 5f).coerceIn(0f, 1f))
-                                }
-                            } else {
-                                Modifier
-                            },
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.StarOutline,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                            alpha = if (enabled) 1f else 0.55f,
-                        ),
-                        modifier = Modifier.size(20.dp),
-                    )
-                    if (fraction > 0f) {
-                        Icon(
-                            imageVector = Icons.Filled.Star,
-                            contentDescription = null,
-                            tint = if (enabled) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-                            },
-                            modifier = Modifier
-                                .size(20.dp)
-                                .drawWithContent {
-                                    clipRect(right = size.width * fraction) {
-                                        this@drawWithContent.drawContent()
-                                    }
-                                },
-                        )
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .clickable {
+                    if (enabled) {
+                        expanded = true
+                    } else {
+                        Toast.makeText(
+                            context,
+                            R.string.details_rating_requires_tracking,
+                            Toast.LENGTH_SHORT,
+                        ).show()
                     }
                 }
+                .padding(horizontal = 2.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Star,
+                contentDescription = null,
+                tint = if (score > 0) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }.copy(alpha = if (enabled) contentAlpha else 0.45f),
+                modifier = Modifier.size(15.dp),
+            )
+            Text(
+                text = score.toString(),
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }.copy(alpha = contentAlpha),
+                maxLines = 1,
+            )
+        }
+        GlassDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(24.dp),
+            style = GlassDefaults.subtleStyle(),
+        ) {
+            (0..10).forEach { candidate ->
+                DropdownMenuItem(
+                    text = { Text(candidate.toString()) },
+                    onClick = {
+                        expanded = false
+                        onRatingChanged(candidate / 10f)
+                    },
+                    leadingIcon = if (candidate == score) {
+                        {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                )
             }
         }
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (enabled) {
-                MaterialTheme.colorScheme.onSurface
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        )
-    }
-}
-
-private fun resolveCyclicRatingSelection(currentStars: Float, tappedStarIndex: Int): Float {
-    val fullStarRating = tappedStarIndex.toFloat()
-    val halfStarRating = (tappedStarIndex - 0.5f).coerceAtLeast(0.5f)
-    return if (currentStars == halfStarRating) {
-        fullStarRating
-    } else {
-        halfStarRating
     }
 }
 
@@ -1203,8 +1241,6 @@ private fun DetailsSourceSelectorButton(
     isMenuEnabled: Boolean,
     onMenuClick: () -> Unit,
 ) {
-    val expressive = LocalMaterialExpressiveComponentsEnabled.current
-    val sourceSelectorColors = rememberGlassSurfaceColors(style = GlassDefaults.subtleStyle())
     val isPrimaryEnabled = currentDisplayModel != null
 
     Column(
@@ -1217,21 +1253,11 @@ private fun DetailsSourceSelectorButton(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Surface(
-            shape = RoundedCornerShape(if (expressive) 22.dp else 16.dp),
-            color = if (expressive) {
-                sourceSelectorColors.containerColor.detailsButtonContainerColor()
-            } else {
-                MaterialTheme.colorScheme.surface.copy(alpha = 0.18f)
-            },
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.18f),
             border = BorderStroke(
                 1.dp,
-                if (expressive) {
-                    MaterialTheme.colorScheme.outlineVariant.copy(
-                        alpha = sourceSelectorColors.containerColor.alpha.coerceAtMost(0.34f),
-                    )
-                } else {
-                    MaterialTheme.colorScheme.outline.copy(alpha = 0.34f)
-                },
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.34f),
             ),
         ) {
             Row(

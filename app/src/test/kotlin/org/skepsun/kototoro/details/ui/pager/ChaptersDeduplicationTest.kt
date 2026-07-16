@@ -2,6 +2,9 @@ package org.skepsun.kototoro.details.ui.pager
 
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import org.skepsun.kototoro.details.data.ContentDetails
+import org.skepsun.kototoro.details.ui.mapChapters
+import org.skepsun.kototoro.parsers.model.Content
 import org.skepsun.kototoro.details.ui.TestContentSource
 import org.skepsun.kototoro.details.ui.model.ChapterListItem
 import org.skepsun.kototoro.parsers.model.ContentChapter
@@ -102,5 +105,121 @@ class ChaptersDeduplicationTest : StringSpec({
 
         val merged = items.mergeRepeated()
         merged.map { it.chapter.id } shouldBe listOf(1L, 2L, 3L, 4L)
+    }
+
+    "should mark past chapters from other branches as read when currentChapterId is in another branch" {
+        val ch1 = createChapter(id = 1, number = 1.0f, title = "Chapter 1", branch = "BranchA")
+        val ch2 = createChapter(id = 2, number = 2.0f, title = "Chapter 2", branch = "BranchB")
+        val ch3 = createChapter(id = 3, number = 3.0f, title = "Chapter 3", branch = "BranchB")
+
+        val content = Content(
+            id = 100L,
+            title = "Manga",
+            altTitles = emptySet(),
+            url = "http://example.com/manga",
+            publicUrl = "http://example.com/manga",
+            rating = 0f,
+            contentRating = null,
+            coverUrl = null,
+            tags = emptySet(),
+            state = null,
+            authors = emptySet(),
+            chapters = listOf(ch1, ch2, ch3),
+            source = TestContentSource
+        )
+        val contentDetails = ContentDetails(content)
+
+        val mappedA = contentDetails.mapChapters(
+            currentChapterId = 2L,
+            newCount = 0,
+            branch = "BranchA",
+            bookmarks = emptyList(),
+            isGrid = false,
+            isDownloadedOnly = false,
+            shareProgressAcrossBranches = true,
+        )
+
+        mappedA.size shouldBe 1
+        mappedA.first().chapter.id shouldBe 1L
+        mappedA.first().isUnread shouldBe false
+    }
+
+    "should keep branch progress isolated when repeated chapter merging is disabled" {
+        val branchA = createChapter(id = 1, number = 1.0f, title = "Chapter 1", branch = "BranchA")
+        val branchB = createChapter(id = 2, number = 2.0f, title = "Chapter 2", branch = "BranchB")
+        val contentDetails = ContentDetails(
+            Content(
+                id = 100L,
+                title = "Manga",
+                altTitles = emptySet(),
+                url = "http://example.com/manga",
+                publicUrl = "http://example.com/manga",
+                rating = 0f,
+                contentRating = null,
+                coverUrl = null,
+                tags = emptySet(),
+                state = null,
+                authors = emptySet(),
+                chapters = listOf(branchA, branchB),
+                source = TestContentSource,
+            ),
+        )
+
+        val mappedA = contentDetails.mapChapters(
+            currentChapterId = branchB.id,
+            newCount = 0,
+            branch = "BranchA",
+            bookmarks = emptyList(),
+            isGrid = false,
+            isDownloadedOnly = false,
+        )
+
+        mappedA.single().isUnread shouldBe true
+    }
+
+    "should compare volumes when sharing progress across branches" {
+        val earlierVolume = createChapter(
+            id = 1,
+            number = 10.0f,
+            title = "Volume 1 Chapter 10",
+            volume = 1,
+            branch = "BranchA",
+        )
+        val currentVolume = createChapter(
+            id = 2,
+            number = 1.0f,
+            title = "Volume 2 Chapter 1",
+            volume = 2,
+            branch = "BranchB",
+        )
+        val contentDetails = ContentDetails(
+            Content(
+                id = 100L,
+                title = "Manga",
+                altTitles = emptySet(),
+                url = "http://example.com/manga",
+                publicUrl = "http://example.com/manga",
+                rating = 0f,
+                contentRating = null,
+                coverUrl = null,
+                tags = emptySet(),
+                state = null,
+                authors = emptySet(),
+                chapters = listOf(earlierVolume, currentVolume),
+                source = TestContentSource,
+            ),
+        )
+
+        val mapped = contentDetails.mapChapters(
+            currentChapterId = currentVolume.id,
+            newCount = 0,
+            branch = "BranchA",
+            bookmarks = emptyList(),
+            isGrid = false,
+            isDownloadedOnly = false,
+            shareProgressAcrossBranches = true,
+        )
+
+        mapped.single().isUnread shouldBe false
     }
 })
