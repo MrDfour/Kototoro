@@ -57,6 +57,12 @@ import org.skepsun.kototoro.settings.compose.DownloadsSettingsScreen
 import org.skepsun.kototoro.settings.compose.DownloadsSettingsUiState
 import org.skepsun.kototoro.settings.compose.SettingsChoiceOption
 import org.skepsun.kototoro.settings.storage.ContentDirectorySelectDialog
+import org.json.JSONObject
+import org.skepsun.kototoro.core.util.ext.toFileNameSafe
+import org.skepsun.kototoro.parsers.model.ContentChapter
+import org.skepsun.kototoro.local.data.ContentIndex
+import org.skepsun.kototoro.parsers.util.runCatchingCancellable
+import android.widget.Toast
 
 @AndroidEntryPoint
 class DownloadsSettingsFragment : Fragment() {
@@ -69,6 +75,18 @@ class DownloadsSettingsFragment : Fragment() {
 
     @Inject
     lateinit var downloadsScheduler: DownloadWorker.Scheduler
+
+    @Inject
+    lateinit var favouritesRepository: org.skepsun.kototoro.favourites.domain.FavouritesRepository
+
+    @Inject
+    lateinit var mangaDataRepository: org.skepsun.kototoro.core.parser.ContentDataRepository
+
+    @Inject
+    lateinit var repositoryFactory: org.skepsun.kototoro.core.parser.ContentRepository.Factory
+
+    @Inject
+    lateinit var localContentIndex: org.skepsun.kototoro.local.data.index.LocalContentIndex
 
     private val storageTick = MutableStateFlow(0)
     private val dozeTick = MutableStateFlow(0)
@@ -120,6 +138,9 @@ class DownloadsSettingsFragment : Fragment() {
                     onPickPagesDirectory = { initialUri ->
                         pickFileTreeLauncher.tryLaunch(initialUri)
                     },
+                    onForceDownloadIndexRecheckClick = {
+                        rebuildDownloadsIndex()
+                    },
                 )
             }
         }
@@ -160,6 +181,192 @@ class DownloadsSettingsFragment : Fragment() {
         val context = context ?: return false
         return startIgnoreDozeActivity(context, ignoreDozeLauncher)
     }
+
+    private fun rebuildDownloadsIndex() {
+        val context = context ?: return
+        viewLifecycleOwner.lifecycleScope.launch {
+            Toast.makeText(
+                context,
+                R.string.recheck_downloads_started,
+                Toast.LENGTH_SHORT
+            ).show()
+            
+            var updatedCount = 0
+            try {
+                withContext(Dispatchers.IO) {
+                    val favorites = favouritesRepository.getAllContent()
+                    val roots = storageManager.getReadableDirs()
+                    
+                    for (root in roots) {
+                        val children = root.listFiles { f -> f.isDirectory }.orEmpty()
+                        for (mangaFolder in children) {
+                            val cleanFolder = mangaFolder.name.lowercase(java.util.Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+                            val matchingFavorite = favorites.find { favorite ->
+                                val cleanTitle = favorite.title.toFileNameSafe().lowercase(java.util.Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+                                val cleanRawTitle = favorite.title.lowercase(java.util.Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+                                cleanFolder == cleanTitle || cleanFolder == cleanRawTitle
+                            } ?: continue
+                            
+                            val indexFile = File(mangaFolder, "index.json")
+                            val oldIndexJson = if (indexFile.isFile) {
+                                runCatching { JSONObject(indexFile.readText()) }.getOrNull()
+                            } else {
+                                null
+                            }
+                            
+                            var favoriteMangaWithChapters = mangaDataRepository.findContentById(matchingFavorite.id, withChapters = true)
+                            var chapters = favoriteMangaWithChapters?.chapters.orEmpty()
+                            if (chapters.isEmpty()) {
+                                runCatchingCancellable {
+                                    val repo = repositoryFactory.create(matchingFavorite.source)
+                                    val remote = repo.getDetails(matchingFavorite)
+                                    mangaDataRepository.storeContent(remote, replaceExisting = true)
+                                    chapters = remote.chapters.orEmpty()
+                                    favoriteMangaWithChapters = remote
+                                }.onFailure {
+                                    it.printStackTraceDebug()
+                                }
+                            }
+                            
+                            val matched = matchChapters(mangaFolder, chapters, oldIndexJson)
+                            
+                            val newIndex = ContentIndex(null)
+                            newIndex.setContentInfo(favoriteMangaWithChapters ?: matchingFavorite)
+                            
+                            val oldCoverEntry = oldIndexJson?.optString("cover_entry")?.takeIf { it.isNotBlank() }
+                            val coverName = when {
+                                oldCoverEntry != null && File(mangaFolder, oldCoverEntry).exists() -> oldCoverEntry
+                                File(mangaFolder, "cover.jpg").exists() -> "cover.jpg"
+                                File(mangaFolder, "cover.png").exists() -> "cover.png"
+                                else -> null
+                            }
+                            if (coverName != null) {
+                                newIndex.setCoverEntry(coverName)
+                            }
+                            
+                            for ((chapter, filename) in matched) {
+                                newIndex.addChapter(chapter, filename)
+                            }
+                            
+                            runCatching {
+                                indexFile.writeText(newIndex.toString())
+                                updatedCount++
+                            }.onFailure {
+                                it.printStackTraceDebug()
+                            }
+                        }
+                    }
+                    
+                    localContentIndex.update()
+                }
+                
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.recheck_downloads_completed, updatedCount),
+                    Toast.LENGTH_LONG
+                ).show()
+            } catch (e: Exception) {
+                e.printStackTraceDebug()
+                Toast.makeText(
+                    context,
+                    "Error during recheck: ${e.localizedMessage}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    private fun matchChapters(
+        mangaFolder: File,
+        chapters: List<ContentChapter>,
+        oldIndexJson: JSONObject?
+    ): Map<IndexedValue<ContentChapter>, String> {
+        val matched = mutableMapOf<IndexedValue<ContentChapter>, String>()
+        val remainingChapters = chapters.mapIndexed { idx, ch -> IndexedValue(idx, ch) }.toMutableList()
+        val files = mangaFolder.listFiles { f ->
+            val ext = f.extension.lowercase(java.util.Locale.ROOT)
+            f.isFile && (ext == "cbz" || ext == "zip")
+        }.orEmpty()
+
+        if (oldIndexJson != null) {
+            val oldChaptersJson = oldIndexJson.optJSONObject("chapters")
+            if (oldChaptersJson != null) {
+                val keys = oldChaptersJson.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val chJson = oldChaptersJson.getJSONObject(key)
+                    val fileName = chJson.optString("file").takeIf { it.isNotBlank() } ?: continue
+                    val file = File(mangaFolder, fileName)
+                    if (!file.exists()) continue
+
+                    val number = chJson.optDouble("number", Double.NaN)
+                    val name = chJson.optString("name").takeIf { it.isNotBlank() }
+                    val branch = chJson.optString("branch").takeIf { it.isNotBlank() }
+
+                    val match = remainingChapters.find {
+                        (!number.isNaN() && it.value.number == number.toFloat() && (branch == null || it.value.branch == branch))
+                    } ?: remainingChapters.find {
+                        (!number.isNaN() && it.value.number == number.toFloat())
+                    } ?: remainingChapters.find {
+                        (name != null && it.value.title?.equals(name, ignoreCase = true) == true)
+                    }
+
+                    if (match != null) {
+                        matched[match] = fileName
+                        remainingChapters.remove(match)
+                    }
+                }
+            }
+        }
+
+        val remainingFiles = files.filter { it.name !in matched.values }
+        for (file in remainingFiles) {
+            val nameWithoutExt = file.name.substringBeforeLast('.')
+            val indexPart = nameWithoutExt.substringBefore('_').toIntOrNull() ?: nameWithoutExt.toIntOrNull()
+            if (indexPart != null) {
+                val match = remainingChapters.find { it.index == indexPart }
+                if (match != null) {
+                    matched[match] = file.name
+                    remainingChapters.remove(match)
+                    continue
+                }
+            }
+
+            val numberPart = extractChapterNumber(file.name)
+            if (numberPart != null) {
+                val match = remainingChapters.find { it.value.number == numberPart }
+                if (match != null) {
+                    matched[match] = file.name
+                    remainingChapters.remove(match)
+                    continue
+                }
+            }
+        }
+        return matched
+    }
+
+    private fun extractChapterNumber(filename: String): Float? {
+        val name = filename.substringBeforeLast('.')
+        val regexChapter = Regex("(?i)\\b(?:c|ch|chap|chapter|cap|capitulo)\\.?\\s*([0-9]+(?:\\.[0-9]+)?)")
+        regexChapter.find(name)?.groupValues?.get(1)?.toFloatOrNull()?.let {
+            return it
+        }
+        val regexNumber = Regex("([0-9]+(?:\\.[0-9]+)?)")
+        val matches = regexNumber.findAll(name).toList()
+        if (matches.isNotEmpty()) {
+            val lastMatch = matches.last()
+            if (lastMatch.groupValues.size > 1) {
+                lastMatch.groupValues[1].toFloatOrNull()?.let {
+                    return it
+                }
+            } else {
+                lastMatch.value.toFloatOrNull()?.let {
+                    return it
+                }
+            }
+        }
+        return null
+    }
 }
 
 @Composable
@@ -175,6 +382,7 @@ fun DownloadsSettingsRoute(
     onAllowMeteredNetworkChange: (TriStateOption) -> Unit,
     onRequestIgnoreDoze: () -> Boolean,
     onPickPagesDirectory: (Uri?) -> Boolean,
+    onForceDownloadIndexRecheckClick: () -> Unit,
 ) {
     val context = LocalContext.current
     val preferredDownloadFormat =
@@ -319,6 +527,7 @@ fun DownloadsSettingsRoute(
             }
         },
         onPagesSavingAskChange = { settings.isPagesSavingAskEnabled = it },
+        onForceDownloadIndexRecheckClick = onForceDownloadIndexRecheckClick,
     )
 }
 

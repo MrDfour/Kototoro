@@ -1971,6 +1971,10 @@
     <!-- For chapters -->
     <string name="chapters_all">All</string>
     <string name="download_over_cellular">Downloading over cellular network</string>
+    <string name="force_download_index_recheck">Force download index recheck</string>
+    <string name="force_download_index_recheck_summary">Scan local directories and check downloads against favorites or pinned series to align index and files.</string>
+    <string name="recheck_downloads_started">Scanning local folders to match downloaded chapters...</string>
+    <string name="recheck_downloads_completed">Index recheck complete. Found and updated %d series.</string>
     <string name="download_cellular_confirm">Allow downloads over cellular network?</string>
     <string name="dont_allow">Don\'t allow</string>
     <string name="allow_always">Allow always</string>

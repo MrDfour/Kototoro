@@ -65,6 +65,7 @@ fun DownloadsSettingsScreen(
     onIgnoreDozeClick: () -> Unit,
     onPagesDirectoryClick: () -> Unit,
     onPagesSavingAskChange: (Boolean) -> Unit,
+    onForceDownloadIndexRecheckClick: () -> Unit,
 ) {
     Scaffold(
         snackbarHost = {
@@ -194,6 +195,13 @@ fun DownloadsSettingsScreen(
                         value = state.allowDownloadOnMeteredNetwork,
                         options = meteredNetworkOptions,
                         onValueChange = onAllowMeteredNetworkChange,
+                    )
+                    SettingsSectionDivider()
+                    SettingsActionPreference(
+                        title = stringResource(R.string.force_download_index_recheck),
+                        summary = stringResource(R.string.force_download_index_recheck_summary),
+                        showChevron = false,
+                        onClick = onForceDownloadIndexRecheckClick,
                     )
                     SettingsSectionDivider()
                     SettingsInfoPreference(
