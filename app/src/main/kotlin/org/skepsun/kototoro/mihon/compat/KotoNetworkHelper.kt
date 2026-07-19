@@ -65,6 +65,12 @@ class KotoNetworkHelper(
         builder.followSslRedirects(baseClient.followSslRedirects)
         builder.retryOnConnectionFailure(baseClient.retryOnConnectionFailure)
         
+        // Add required interceptors for KeiSource (Keiyoushi) compatibility.
+        // KeiSource asserts these exist by simpleName in interceptors().
+        builder.addInterceptor(eu.kanade.tachiyomi.network.interceptor.UncaughtExceptionInterceptor())
+        builder.addInterceptor(eu.kanade.tachiyomi.network.interceptor.UserAgentInterceptor(::defaultUserAgentProvider))
+        builder.addInterceptor(eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor())
+        
         // Wrap exceptions thrown by subsequent interceptors (especially from extensions)
         builder.addInterceptor { chain ->
             try {
@@ -77,18 +83,27 @@ class KotoNetworkHelper(
             }
         }
         
-        // Copy interceptors but exclude GZipInterceptor
+        // Copy interceptors but exclude GZipInterceptor and BrotliInterceptor
         baseClient.interceptors.forEach { interceptor ->
-            if (interceptor.javaClass.simpleName != "GZipInterceptor") {
+            val name = interceptor.javaClass.simpleName
+            if (name != "GZipInterceptor" && name != "BrotliInterceptor") {
                 builder.addInterceptor(interceptor)
             } else {
-                android.util.Log.d("KotoNetworkHelper", "Skipping GZipInterceptor for Mihon client")
+                android.util.Log.d("KotoNetworkHelper", "Skipping $name for Mihon compat client")
             }
         }
         
-        // Copy network interceptors
+        // Copy network interceptors, replacing BrotliInterceptor with KotoBrotliInterceptor.
+        // KeiSource asserts: networkInterceptors().none { it is BrotliInterceptor }
+        // KotoBrotliInterceptor is a different class so `is` check returns false,
+        // while still delegating to BrotliInterceptor for actual decompression.
         baseClient.networkInterceptors.forEach { interceptor ->
-            builder.addNetworkInterceptor(interceptor)
+            if (interceptor.javaClass.simpleName != "BrotliInterceptor") {
+                builder.addNetworkInterceptor(interceptor)
+            } else {
+                builder.addNetworkInterceptor(KotoBrotliInterceptor())
+                android.util.Log.d("KotoNetworkHelper", "Replaced BrotliInterceptor with KotoBrotliInterceptor")
+            }
         }
 
         // Add a Mihon-specific fallback detector.
