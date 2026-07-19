@@ -80,7 +80,7 @@ class KotoNetworkHelper(
         
         // Mihon extensions handle compression and require Brotli to be absent from the default client.
         baseClient.interceptors.forEach { interceptor ->
-            if (interceptor.javaClass.simpleName != "GZipInterceptor" && interceptor !== BrotliInterceptor) {
+            if (interceptor.javaClass.simpleName != "GZipInterceptor" && interceptor.javaClass.simpleName != "BrotliInterceptor") {
                 builder.addInterceptor(interceptor)
             } else {
                 android.util.Log.d("KotoNetworkHelper", "Skipping ${interceptor.javaClass.simpleName} for Mihon client")
@@ -89,7 +89,7 @@ class KotoNetworkHelper(
         
         // Copy compatible network interceptors.
         baseClient.networkInterceptors.forEach { interceptor ->
-            if (interceptor !== BrotliInterceptor) {
+            if (interceptor.javaClass.simpleName != "BrotliInterceptor") {
                 builder.addNetworkInterceptor(interceptor)
             } else {
                 android.util.Log.d("KotoNetworkHelper", "Skipping BrotliInterceptor for Mihon client")
