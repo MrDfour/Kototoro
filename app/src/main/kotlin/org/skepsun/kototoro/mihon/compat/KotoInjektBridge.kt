@@ -56,7 +56,7 @@ class KotoInjektBridge(
                     
                     // Network components
                     addSingletonFactory<NetworkHelper> { networkHelper }
-                    addSingletonFactory<OkHttpClient> { networkHelper.client }
+                    addSingletonFactory<OkHttpClient> { httpClient }
                     addSingletonFactory<okhttp3.CookieJar> { cookieJar }
                     
                     // Json - explicitly type it to ensure Injekt matches correctly

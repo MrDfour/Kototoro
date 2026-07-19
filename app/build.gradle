@@ -386,6 +386,8 @@ configurations.all {
 	implementation libs.okhttp
 	implementation libs.okhttp.tls
 	implementation libs.okhttp.brotli
+	implementation libs.okhttp.zstd
+	implementation libs.zstd.kmp.okio
 	implementation libs.okhttp.dnsoverhttps
 	implementation libs.okio
 	implementation libs.kotlinx.serialization.json
