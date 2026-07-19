@@ -1206,9 +1206,10 @@ class UnifiedSourcesViewModel @Inject constructor(
 		val repositoriesById = repositories.associateBy { it.id }
 		val enrichedPackages = packages.enrichWithSourceCoverage(sources)
 		val packagesById = enrichedPackages.associateBy { it.id }
-		val visibleRepositories = repositories.filterBy(filters)
-		val visiblePackages = enrichedPackages.filterBy(filters, repositoriesById)
-		val visibleSources = sources.filterBy(filters, repositoriesById, packagesById)
+		val sourcesByPackageId = sources.groupBy { it.packageId.orEmpty() }
+		val visibleRepositories = repositories.filterRepositoriesBy(filters)
+		val visiblePackages = enrichedPackages.filterPackagesBy(filters, repositoriesById, sourcesByPackageId)
+		val visibleSources = sources.filterSourcesBy(filters, repositoriesById, packagesById)
 		val availableLanguages = (enrichedPackages.mapNotNull { it.language } + sources.mapNotNull { it.language })
 			.map { it.normalizeLanguageCode() }
 			.filter { it.isNotBlank() }
@@ -1218,6 +1219,18 @@ class UnifiedSourcesViewModel @Inject constructor(
 			TAG,
 			"language filter availableLanguages=$availableLanguages selectedLanguages=${filters.languages}",
 		)
+
+		val derivedPackageContentTypes = enrichedPackages.flatMap { packageItem ->
+			val declared = when (packageItem.kind) {
+				UnifiedSourceKind.MIHON -> if (packageItem.isNsfw) listOf(ContentType.HENTAI_MANGA) else listOf(ContentType.MANGA)
+				UnifiedSourceKind.ANIYOMI -> listOf(ContentType.VIDEO)
+				UnifiedSourceKind.IREADER -> if (packageItem.isNsfw) listOf(ContentType.HENTAI_NOVEL) else listOf(ContentType.NOVEL)
+				UnifiedSourceKind.CLOUDSTREAM -> if (packageItem.isNsfw) listOf(ContentType.HENTAI_VIDEO) else listOf(ContentType.VIDEO)
+				else -> emptyList()
+			}
+			val fromSources = sourcesByPackageId[packageItem.id]?.map { it.contentType }.orEmpty()
+			declared + fromSources
+		}
 
 		return UnifiedSourcesUiState.Ready(
 			filters = filters,
@@ -1230,7 +1243,7 @@ class UnifiedSourcesViewModel @Inject constructor(
 			availableKinds = (repositories.map { it.kind } + enrichedPackages.map { it.kind } + sources.map { it.kind })
 				.distinct()
 				.sortedBy { it.ordinal },
-			availableContentTypes = sources.map { it.contentType }
+			availableContentTypes = (sources.map { it.contentType } + derivedPackageContentTypes)
 				.distinct()
 				.sortedBy { it.ordinal },
 			availableLocationTypes = repositories.map { it.locationType }
@@ -1271,7 +1284,7 @@ class UnifiedSourcesViewModel @Inject constructor(
 		}
 	}
 
-	private fun List<UnifiedSourceRepositoryItem>.filterBy(
+	private fun List<UnifiedSourceRepositoryItem>.filterRepositoriesBy(
 		filters: UnifiedSourcesFilterState,
 	): List<UnifiedSourceRepositoryItem> {
 		val query = filters.query.trim()
@@ -1283,13 +1296,15 @@ class UnifiedSourcesViewModel @Inject constructor(
 			.toList()
 	}
 
-	private fun List<UnifiedSourcePackageItem>.filterBy(
+	private fun List<UnifiedSourcePackageItem>.filterPackagesBy(
 		filters: UnifiedSourcesFilterState,
 		repositoriesById: Map<String, UnifiedSourceRepositoryItem>,
+		sourcesByPackageId: Map<String, List<UnifiedSourceItem>>,
 	): List<UnifiedSourcePackageItem> {
 		val query = filters.query.trim()
 		return asSequence()
 			.filter { filters.kinds.isEmpty() || it.kind in filters.kinds }
+			.filter { filters.contentTypes.isEmpty() || it.matchesContentTypes(filters.contentTypes, sourcesByPackageId[it.id]) }
 			.filter { filters.locationTypes.isEmpty() || it.repositoryLocationType(repositoriesById) in filters.locationTypes }
 			.filter { filters.languages.isEmpty() || it.language.matchesLanguageFilter(filters.languages) }
 			.filter {
@@ -1304,7 +1319,24 @@ class UnifiedSourcesViewModel @Inject constructor(
 			.toList()
 	}
 
-	private fun List<UnifiedSourceItem>.filterBy(
+	private fun UnifiedSourcePackageItem.matchesContentTypes(
+		contentTypes: Set<ContentType>,
+		packageSources: List<UnifiedSourceItem>?,
+	): Boolean {
+		if (contentTypes.isEmpty()) return true
+		val declaredTypes = when (kind) {
+			UnifiedSourceKind.MIHON -> if (isNsfw) setOf(ContentType.HENTAI_MANGA) else setOf(ContentType.MANGA)
+			UnifiedSourceKind.ANIYOMI -> setOf(ContentType.VIDEO)
+			UnifiedSourceKind.IREADER -> if (isNsfw) setOf(ContentType.HENTAI_NOVEL) else setOf(ContentType.NOVEL)
+			UnifiedSourceKind.CLOUDSTREAM -> if (isNsfw) setOf(ContentType.HENTAI_VIDEO) else setOf(ContentType.VIDEO)
+			else -> emptySet()
+		}
+		val sourceTypes = packageSources?.map { it.contentType }?.toSet().orEmpty()
+		val combined = declaredTypes + sourceTypes
+		return combined.any { it in contentTypes }
+	}
+
+	private fun List<UnifiedSourceItem>.filterSourcesBy(
 		filters: UnifiedSourcesFilterState,
 		repositoriesById: Map<String, UnifiedSourceRepositoryItem>,
 		packagesById: Map<String, UnifiedSourcePackageItem>,

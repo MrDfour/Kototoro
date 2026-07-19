@@ -330,7 +330,7 @@ class MihonExtensionLoader @Inject constructor(
         } else {
             val trustedFingerprints = runCatching {
                 kotlinx.coroutines.runBlocking {
-                    repoRepository.getByType(org.skepsun.kototoro.extensions.repo.ExternalExtensionType.JAR)
+                    repoRepository.getByType(org.skepsun.kototoro.extensions.repo.ExternalExtensionType.MIHON)
                         .map { it.signingKeyFingerprint }
                         .toSet()
                 }
