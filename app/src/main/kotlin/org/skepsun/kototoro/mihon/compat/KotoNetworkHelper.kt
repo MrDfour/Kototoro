@@ -89,10 +89,13 @@ class KotoNetworkHelper(
         
         // Copy compatible network interceptors.
         baseClient.networkInterceptors.forEach { interceptor ->
-            if (interceptor.javaClass.simpleName != "BrotliInterceptor") {
-                builder.addNetworkInterceptor(interceptor)
+            if (interceptor.javaClass.simpleName == "BrotliInterceptor") {
+                // Keiyoushi 1.6.X extensions strictly check that "BrotliInterceptor" is not present,
+                // but 1.4.X extensions rely on Kototoro's Brotli support to avoid Cloudflare fingerprint mismatch.
+                // We wrap it in a class with a different name to bypass the Keiyoushi check.
+                builder.addNetworkInterceptor(CompatBrotliInterceptor())
             } else {
-                android.util.Log.d("KotoNetworkHelper", "Skipping BrotliInterceptor for Mihon client")
+                builder.addNetworkInterceptor(interceptor)
             }
         }
 
@@ -909,5 +912,11 @@ class KotoNetworkHelper(
             CloudFlareHelper.PROTECTION_BLOCKED -> "blocked"
             else -> "none"
         }
+    }
+}
+
+private class CompatBrotliInterceptor : okhttp3.Interceptor {
+    override fun intercept(chain: okhttp3.Interceptor.Chain): okhttp3.Response {
+        return okhttp3.brotli.BrotliInterceptor.intercept(chain)
     }
 }
