@@ -342,9 +342,7 @@ class KotoNetworkHelper(
      * interceptor and installs CompressionInterceptor itself.
      */
     @Deprecated("The regular client handles Cloudflare by default")
-    override val cloudflareClient: OkHttpClient = client.newBuilder()
-        .addNetworkInterceptor(BrotliInterceptor)
-        .build()
+    override val cloudflareClient: OkHttpClient = client
     
     /**
      * Returns the default user agent string.

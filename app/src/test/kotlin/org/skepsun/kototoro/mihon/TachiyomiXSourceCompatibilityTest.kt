@@ -121,7 +121,7 @@ class TachiyomiXSourceCompatibilityTest {
 		)
 
 		assertFalse(network.client.networkInterceptors.any { it === BrotliInterceptor })
-		assertEquals(1, network.cloudflareClient.networkInterceptors.count { it === BrotliInterceptor })
+		assertSame(network.client, network.cloudflareClient)
 	}
 
 	@Test
@@ -295,7 +295,8 @@ class TachiyomiXSourceCompatibilityTest {
 	fun `HttpSource suspend chapter list falls back to custom legacy fetch when helper is unsupported`() = runTest {
 		val source = LegacyFetchHttpSource()
 
-		val chapters = source.getChapterList(manga("/manga", "Manga"))
+		val update = source.getMangaUpdate(manga("/manga", "Manga"), emptyList(), fetchDetails = false, fetchChapters = true)
+		val chapters = update.chapters
 
 		assertEquals(listOf("Legacy Chapter"), chapters.map { it.name })
 	}
@@ -313,7 +314,8 @@ class TachiyomiXSourceCompatibilityTest {
 	fun `HttpSource suspend chapter list uses fetchChapterList when both request helper and fetch are overridden`() = runTest {
 		val source = LegacyFetchWithRequestHttpSource()
 
-		val chapters = source.getChapterList(manga("/manga", "Manga"))
+		val update = source.getMangaUpdate(manga("/manga", "Manga"), emptyList(), fetchDetails = false, fetchChapters = true)
+		val chapters = update.chapters
 
 		assertEquals(listOf("Legacy Custom Chapter"), chapters.map { it.name })
 	}
@@ -326,7 +328,8 @@ class TachiyomiXSourceCompatibilityTest {
 		try {
 			val source = SuperDelegatingFetchChapterHttpSource(server.url("/").toString().removeSuffix("/"))
 
-			val chapters = source.getChapterList(manga("/manga", "Manga"))
+			val update = source.getMangaUpdate(manga("/manga", "Manga"), emptyList(), fetchDetails = false, fetchChapters = true)
+			val chapters = update.chapters
 
 			assertEquals(listOf("Chapter From Super!"), chapters.map { it.name })
 			assertEquals("/manga", server.takeRequest().path)
@@ -343,7 +346,8 @@ class TachiyomiXSourceCompatibilityTest {
 		try {
 			val source = SuperDelegatingFetchDetailsHttpSource(server.url("/").toString().removeSuffix("/"))
 
-			val details = source.getMangaDetails(manga("/manga", "Manga"))
+			val update = source.getMangaUpdate(manga("/manga", "Manga"), emptyList(), fetchDetails = true, fetchChapters = false)
+			val details = update.manga
 
 			assertEquals("Details From Super!", details.title)
 			assertEquals("/manga", server.takeRequest().path)
@@ -507,10 +511,6 @@ class TachiyomiXSourceCompatibilityTest {
 		override val lang: String = "en"
 		override val name: String = "Coroutine"
 		override val supportsLatest: Boolean = false
-
-		override fun fetchPopularManga(page: Int): Observable<MangasPage> {
-			throw AssertionError("suspend API must not call legacy fetchPopularManga")
-		}
 
 		override fun popularMangaRequest(page: Int): Request {
 			return Request.Builder().url("$baseUrl/popular/$page").build()

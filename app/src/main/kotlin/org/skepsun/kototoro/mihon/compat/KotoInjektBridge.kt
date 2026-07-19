@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.kanade.tachiyomi.network.NetworkHelper
+import eu.kanade.tachiyomi.network.JavaScriptEngine
 import okhttp3.OkHttpClient
 import org.skepsun.kototoro.core.network.ContentHttpClient
 import org.skepsun.kototoro.core.network.webview.WebViewExecutor
@@ -58,6 +59,9 @@ class KotoInjektBridge(
                     addSingletonFactory<NetworkHelper> { networkHelper }
                     addSingletonFactory<OkHttpClient> { httpClient }
                     addSingletonFactory<okhttp3.CookieJar> { cookieJar }
+                    
+                    // JavaScript Engine
+                    addSingletonFactory { JavaScriptEngine(context) }
                     
                     // Json - explicitly type it to ensure Injekt matches correctly
                     val json = Json {
