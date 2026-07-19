@@ -153,7 +153,7 @@ class MihonExtensionLoader @Inject constructor(
         )
         
         // Mihon strictly checks for the feature, but we can be more inclusive
-        val isExtension = hasFeature || (hasPackageName && hasMetaData)
+        val isExtension = hasFeature || hasPackageName || hasMetaData
         
         // Enhanced logging for debugging - LOG ALL POTENTIAL MATCHES
         if (hasPackageName || isExtension) {
@@ -340,7 +340,10 @@ class MihonExtensionLoader @Inject constructor(
             val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
             val manuallyTrusted = prefs.getStringSet("trusted_signatures", emptySet()) ?: emptySet()
 
-            trustedFingerprints.any { signatures.contains(it) } || key in manuallyTrusted
+            val normalizedSignatures = signatures.map { it.lowercase().replace(":", "").replace(" ", "") }
+            val normalizedTrusted = trustedFingerprints.map { it.lowercase().replace(":", "").replace(" ", "") }
+
+            normalizedTrusted.any { normalizedSignatures.contains(it) } || key in manuallyTrusted
         }
 
         if (!isTrusted) {
