@@ -83,28 +83,6 @@ class KotoNetworkHelper(
             }
         }
         
-        // Copy interceptors but exclude GZipInterceptor and BrotliInterceptor
-        baseClient.interceptors.forEach { interceptor ->
-            val name = interceptor.javaClass.simpleName
-            if (name != "GZipInterceptor" && name != "BrotliInterceptor") {
-                builder.addInterceptor(interceptor)
-            } else {
-                android.util.Log.d("KotoNetworkHelper", "Skipping $name for Mihon compat client")
-            }
-        }
-        
-        // Copy network interceptors, replacing BrotliInterceptor with KotoBrotliInterceptor.
-        // KeiSource asserts: networkInterceptors().none { it is BrotliInterceptor }
-        // KotoBrotliInterceptor is a different class so `is` check returns false,
-        // while still delegating to BrotliInterceptor for actual decompression.
-        baseClient.networkInterceptors.forEach { interceptor ->
-            if (interceptor.javaClass.simpleName != "BrotliInterceptor") {
-                builder.addNetworkInterceptor(interceptor)
-            } else {
-                builder.addNetworkInterceptor(KotoBrotliInterceptor())
-                android.util.Log.d("KotoNetworkHelper", "Replaced BrotliInterceptor with KotoBrotliInterceptor")
-            }
-        }
 
         // Add a Mihon-specific fallback detector.
         // Some Mihon sources build their own clients from network.cloudflareClient, and in practice
