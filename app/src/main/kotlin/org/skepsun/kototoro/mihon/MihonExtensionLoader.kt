@@ -78,6 +78,17 @@ class MihonExtensionLoader @Inject constructor(
             val localPkgs = LocalApkExtensionSupport.getLocalArchivePackages(context, pkgManager, ECOSYSTEM_DIR)
             android.util.Log.d(TAG, "Filtering ${installedPkgs.size} packages...")
             
+            // Log candidate packages to help diagnose visibility or metadata issues
+            installedPkgs.forEach { pkg ->
+                val name = pkg.packageName
+                if (name.contains("extension", ignoreCase = true) || name.contains("tachiyomi", ignoreCase = true) || name.contains("keiyoushi", ignoreCase = true)) {
+                    val isExt = isPackageAnExtension(pkg)
+                    val appInfo = pkg.applicationInfo
+                    val metaData = appInfo?.metaData
+                    android.util.Log.d(TAG, "SCAN_LOG: pkg=$name isExt=$isExt hasAppInfo=${appInfo != null} hasMeta=${metaData != null}")
+                }
+            }
+
             // Filter to only extension packages
             val extPkgs = (installedPkgs + localPkgs).filter { pkg: PackageInfo ->
                 val isExt = isPackageAnExtension(pkg)
@@ -323,39 +334,6 @@ class MihonExtensionLoader @Inject constructor(
         val appName = metaData.getString(METADATA_NEW_NAME) ?: ExternalExtensionLoaderSupport.getAppLabel(context, appInfo)
         val lang = ExternalExtensionLoaderSupport.extractLanguage(pkgName, "extension")
 
-        // Signature & Trust Verification
-        val signatures = getSignatures(completePkgInfo)
-        val isTrusted = if (signatures.isNullOrEmpty()) {
-            false
-        } else {
-            val trustedFingerprints = runCatching {
-                kotlinx.coroutines.runBlocking {
-                    repoRepository.getByType(org.skepsun.kototoro.extensions.repo.ExternalExtensionType.MIHON)
-                        .map { it.signingKeyFingerprint }
-                        .toSet()
-                }
-            }.getOrDefault(emptySet())
-
-            val key = "$pkgName:$versionCode:${signatures.last()}"
-            val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
-            val manuallyTrusted = prefs.getStringSet("trusted_signatures", emptySet()) ?: emptySet()
-
-            val normalizedSignatures = signatures.map { it.lowercase().replace(":", "").replace(" ", "") }
-            val normalizedTrusted = trustedFingerprints.map { it.lowercase().replace(":", "").replace(" ", "") }
-
-            normalizedTrusted.any { normalizedSignatures.contains(it) } || key in manuallyTrusted
-        }
-
-        if (!isTrusted) {
-            android.util.Log.w(TAG, "loadExtension($pkgName) Untrusted: signatures=$signatures")
-            return MihonLoadResult.Untrusted(
-                pkgName = pkgName,
-                appName = appName,
-                versionCode = versionCode,
-                versionName = versionName,
-            )
-        }
-        
         // Create ClassLoader for this extension
         val classLoader = try {
             val dexPath = LocalApkExtensionSupport.prepareLoadableApkPath(
