@@ -13,6 +13,10 @@ import rx.Subscription
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resumeWithException
+import kotlinx.serialization.DeserializationStrategy
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.okio.decodeFromBufferedSource
+import kotlinx.serialization.serializer
 
 /**
  * OkHttp extension functions for Mihon compatibility.
@@ -129,3 +133,18 @@ fun OkHttpClient.newCachelessCallWithProgress(request: Request, listener: Progre
  * @param code [Int] the HTTP status code
  */
 class HttpException(val code: Int) : IllegalStateException("HTTP error $code")
+
+context(Json)
+inline fun <reified T> Response.parseAs(): T {
+    return decodeFromJsonResponse(serializer(), this)
+}
+
+context(Json)
+fun <T> decodeFromJsonResponse(
+    deserializer: DeserializationStrategy<T>,
+    response: Response,
+): T {
+    return response.body.source().use {
+        decodeFromBufferedSource(deserializer, it)
+    }
+}

@@ -45,7 +45,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class KotoNetworkHelper(
     baseClient: OkHttpClient,
-    val cookieJar: okhttp3.CookieJar,
+    override val cookieJar: okhttp3.CookieJar,
     private val webViewExecutor: WebViewExecutor? = null,
 ) : NetworkHelper() {
 

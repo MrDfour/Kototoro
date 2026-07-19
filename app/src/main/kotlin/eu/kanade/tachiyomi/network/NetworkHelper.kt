@@ -1,19 +1,25 @@
 package eu.kanade.tachiyomi.network
 
 import okhttp3.OkHttpClient
+import okhttp3.CookieJar
 
 /**
- * Mihon-compatible NetworkHelper interface.
+ * Mihon-compatible NetworkHelper class.
  * Provides access to OkHttpClient for extensions.
- * 
- * This will be implemented by Kototoro to bridge with its existing network stack.
  */
-abstract class NetworkHelper {
+open class NetworkHelper {
     
     /**
      * The default OkHttpClient with CloudFlare bypassing.
      */
-    abstract val client: OkHttpClient
+    open val client: OkHttpClient
+        get() = throw UnsupportedOperationException("client not implemented in base NetworkHelper")
+
+    /**
+     * Cookie jar used by the client.
+     */
+    open val cookieJar: CookieJar
+        get() = throw UnsupportedOperationException("cookieJar not implemented in base NetworkHelper")
     
     /**
      * @deprecated Since extension-lib 1.5
@@ -25,5 +31,7 @@ abstract class NetworkHelper {
     /**
      * Returns the default user agent string.
      */
-    abstract fun defaultUserAgentProvider(): String
+    open fun defaultUserAgentProvider(): String {
+        throw UnsupportedOperationException("defaultUserAgentProvider not implemented in base NetworkHelper")
+    }
 }
