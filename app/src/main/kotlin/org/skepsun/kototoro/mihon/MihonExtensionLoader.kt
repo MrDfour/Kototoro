@@ -35,6 +35,7 @@ class MihonExtensionLoader @Inject constructor(
     @ApplicationContext private val applicationContext: Context,
     private val injektBridge: dagger.Lazy<KotoInjektBridge>,
     private val settings: AppSettings,
+    private val repoRepository: org.skepsun.kototoro.extensions.repo.ExternalExtensionRepoRepository,
 ) {
     companion object {
         private const val TAG = "MihonExtensionLoader"
@@ -54,7 +55,9 @@ class MihonExtensionLoader @Inject constructor(
         // Supported library version range
         const val LIB_VERSION_MIN = 1.2
         const val LIB_VERSION_MAX = 1.9
-        
+
+        // Supported library versions
+        private val SUPPORTED_LIB_VERSIONS = listOf(1.4, 1.5, 1.6)
     }
     
     /**
@@ -75,6 +78,17 @@ class MihonExtensionLoader @Inject constructor(
             val localPkgs = LocalApkExtensionSupport.getLocalArchivePackages(context, pkgManager, ECOSYSTEM_DIR)
             android.util.Log.d(TAG, "Filtering ${installedPkgs.size} packages...")
             
+            // Log candidate packages to help diagnose visibility or metadata issues
+            installedPkgs.forEach { pkg ->
+                val name = pkg.packageName
+                if (name.contains("extension", ignoreCase = true) || name.contains("tachiyomi", ignoreCase = true) || name.contains("keiyoushi", ignoreCase = true)) {
+                    val isExt = isPackageAnExtension(pkg)
+                    val appInfo = pkg.applicationInfo
+                    val metaData = appInfo?.metaData
+                    android.util.Log.d(TAG, "SCAN_LOG: pkg=$name isExt=$isExt hasAppInfo=${appInfo != null} hasMeta=${metaData != null}")
+                }
+            }
+
             // Filter to only extension packages
             val extPkgs = (installedPkgs + localPkgs).filter { pkg: PackageInfo ->
                 val isExt = isPackageAnExtension(pkg)
@@ -150,7 +164,7 @@ class MihonExtensionLoader @Inject constructor(
         )
         
         // Mihon strictly checks for the feature, but we can be more inclusive
-        val isExtension = hasFeature || (hasPackageName && hasMetaData)
+        val isExtension = hasFeature || hasPackageName || hasMetaData
         
         // Enhanced logging for debugging - LOG ALL POTENTIAL MATCHES
         if (hasPackageName || isExtension) {
@@ -227,6 +241,40 @@ class MihonExtensionLoader @Inject constructor(
         )
     }
     
+    @Suppress("DEPRECATION")
+    private fun getSignatures(pkgInfo: PackageInfo): List<String>? {
+        val signingInfo = pkgInfo.signingInfo
+        val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P && signingInfo != null) {
+            if (signingInfo.hasMultipleSigners()) {
+                signingInfo.apkContentsSigners
+            } else {
+                signingInfo.signingCertificateHistory
+            }
+        } else {
+            pkgInfo.signatures
+        }
+
+        return signatures
+            ?.map { sha256(it.toByteArray()) }
+            ?.toList()
+    }
+
+    private fun sha256(bytes: ByteArray): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(bytes)
+        val chars = charArrayOf(
+            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+            'a', 'b', 'c', 'd', 'e', 'f'
+        )
+        val out = CharArray(hash.size shl 1)
+        var j = 0
+        for (i in hash.indices) {
+            out[j++] = chars[(240 and hash[i].toInt()).ushr(4)]
+            out[j++] = chars[15 and hash[i].toInt()]
+        }
+        return String(out)
+    }
+
     private fun loadExtension(context: Context, pkgInfo: PackageInfo): MihonLoadResult {
         val completePkgInfo = ExternalExtensionLoaderSupport.refreshPackageInfoIfNeeded(
             context.packageManager,
@@ -276,8 +324,8 @@ class MihonExtensionLoader @Inject constructor(
             }
         
         // Check library version compatibility
-        if (libVersion < LIB_VERSION_MIN || libVersion > LIB_VERSION_MAX) {
-            val err = "Incompatible lib version: $libVersion (supported: $LIB_VERSION_MIN-$LIB_VERSION_MAX) for versionName=$versionName"
+        if (libVersion !in SUPPORTED_LIB_VERSIONS) {
+            val err = "Incompatible lib version: $libVersion (supported: ${SUPPORTED_LIB_VERSIONS.joinToString()}) for versionName=$versionName"
             android.util.Log.e(TAG, "loadExtension($pkgName) FAILED: $err")
             return MihonLoadResult.Error(pkgName, err)
         }
@@ -285,7 +333,7 @@ class MihonExtensionLoader @Inject constructor(
         // Get app name and language
         val appName = metaData.getString(METADATA_NEW_NAME) ?: ExternalExtensionLoaderSupport.getAppLabel(context, appInfo)
         val lang = ExternalExtensionLoaderSupport.extractLanguage(pkgName, "extension")
-        
+
         // Create ClassLoader for this extension
         val classLoader = try {
             val dexPath = LocalApkExtensionSupport.prepareLoadableApkPath(

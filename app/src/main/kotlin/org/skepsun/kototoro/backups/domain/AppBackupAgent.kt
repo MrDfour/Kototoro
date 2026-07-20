@@ -85,6 +85,7 @@ class AppBackupAgent : BackupAgent() {
 								)
 							},
 							settings = appSettings,
+							repoRepository = entryPoint.externalExtensionRepoRepository(),
 						),
 					),
 					aniyomiExtensionManager = org.skepsun.kototoro.aniyomi.AniyomiExtensionManager(
@@ -184,6 +185,7 @@ class AppBackupAgent : BackupAgent() {
 									)
 								},
 								settings = appSettings,
+								repoRepository = entryPoint.externalExtensionRepoRepository(),
 							),
 						),
 						aniyomiExtensionManager = org.skepsun.kototoro.aniyomi.AniyomiExtensionManager(

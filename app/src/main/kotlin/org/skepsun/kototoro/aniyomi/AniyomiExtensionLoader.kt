@@ -139,7 +139,7 @@ class AniyomiExtensionLoader @Inject constructor(
             sourceFactoryKey = METADATA_SOURCE_FACTORY,
         )
         
-        val isExtension = hasFeature || (hasPackageName && hasMetaData)
+        val isExtension = hasFeature || hasPackageName || hasMetaData
         
         if (hasPackageName || isExtension) {
             android.util.Log.d(TAG, "isPackageAnExtension($pkgName): isExt=$isExtension (feature=$hasFeature, name=$hasPackageName, meta=$hasMetaData)")
