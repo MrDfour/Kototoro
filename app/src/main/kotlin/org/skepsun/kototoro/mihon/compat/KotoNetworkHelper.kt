@@ -321,9 +321,10 @@ class KotoNetworkHelper(
     }
 
     private fun isCompatibleInterceptor(interceptor: okhttp3.Interceptor): Boolean {
-        return interceptor !== BrotliInterceptor &&
-            interceptor.javaClass.simpleName != "GZipInterceptor" &&
-            interceptor.javaClass.simpleName != "IgnoreGzipInterceptor"
+        val name = interceptor.javaClass.simpleName
+        return name != "BrotliInterceptor" &&
+            name != "GZipInterceptor" &&
+            name != "IgnoreGzipInterceptor"
     }
 
     private fun isDefaultMihonInterceptor(interceptor: okhttp3.Interceptor): Boolean {
@@ -342,9 +343,7 @@ class KotoNetworkHelper(
      * interceptor and installs CompressionInterceptor itself.
      */
     @Deprecated("The regular client handles Cloudflare by default")
-    override val cloudflareClient: OkHttpClient = client.newBuilder()
-        .addNetworkInterceptor(BrotliInterceptor)
-        .build()
+    override val cloudflareClient: OkHttpClient = client
     
     /**
      * Returns the default user agent string.

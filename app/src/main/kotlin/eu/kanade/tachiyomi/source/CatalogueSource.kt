@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.source
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.util.awaitSingle
 import rx.Observable
 
 /**
@@ -46,7 +47,7 @@ interface CatalogueSource : Source {
      */
     @Suppress("DEPRECATION")
     override suspend fun getPopularManga(page: Int): MangasPage {
-        return fetchPopularManga(page).toBlocking().first()
+        return fetchPopularManga(page).awaitSingle()
     }
 
     /**
@@ -59,7 +60,7 @@ interface CatalogueSource : Source {
      */
     @Suppress("DEPRECATION")
     override suspend fun getSearchManga(page: Int, query: String, filters: FilterList): MangasPage {
-        return fetchSearchManga(page, query, filters).toBlocking().first()
+        return fetchSearchManga(page, query, filters).awaitSingle()
     }
 
     /**
@@ -70,7 +71,7 @@ interface CatalogueSource : Source {
      */
     @Suppress("DEPRECATION")
     override suspend fun getLatestUpdates(page: Int): MangasPage {
-        return fetchLatestUpdates(page).toBlocking().first()
+        return fetchLatestUpdates(page).awaitSingle()
     }
 
     /**

@@ -2,6 +2,7 @@ package org.skepsun.kototoro.mihon
 
 import androidx.arch.core.executor.ArchTaskExecutor
 import androidx.arch.core.executor.TaskExecutor
+import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UncaughtExceptionInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UserAgentInterceptor
@@ -500,7 +501,7 @@ class TachiyomiXSourceCompatibilityTest {
 		override fun imageUrlParse(response: Response): String = unused()
 	}
 
-	private class CoroutineHttpSource(
+	internal class CoroutineHttpSource(
 		override val baseUrl: String,
 	) : HttpSource() {
 		override val client: OkHttpClient = OkHttpClient()
@@ -508,8 +509,11 @@ class TachiyomiXSourceCompatibilityTest {
 		override val name: String = "Coroutine"
 		override val supportsLatest: Boolean = false
 
-		override fun fetchPopularManga(page: Int): Observable<MangasPage> {
-			throw AssertionError("suspend API must not call legacy fetchPopularManga")
+		override suspend fun getPopularManga(page: Int): MangasPage {
+			val request = popularMangaRequest(page)
+			return client.newCall(request).awaitSuccess().use { response ->
+				popularMangaParse(response)
+			}
 		}
 
 		override fun popularMangaRequest(page: Int): Request {
@@ -533,7 +537,7 @@ class TachiyomiXSourceCompatibilityTest {
 		override fun imageUrlParse(response: Response): String = unused()
 	}
 
-	private class LegacyFetchHttpSource : HttpSource() {
+	internal class LegacyFetchHttpSource : HttpSource() {
 		override val baseUrl: String = "https://example.org"
 		override val lang: String = "en"
 		override val name: String = "Legacy Fetch"
@@ -559,7 +563,7 @@ class TachiyomiXSourceCompatibilityTest {
 		override fun imageUrlParse(response: Response): String = unused()
 	}
 
-	private class LegacyPageFetchHttpSource : HttpSource() {
+	internal class LegacyPageFetchHttpSource : HttpSource() {
 		override val baseUrl: String = "https://example.org"
 		override val lang: String = "en"
 		override val name: String = "Legacy Page Fetch"
@@ -581,7 +585,7 @@ class TachiyomiXSourceCompatibilityTest {
 		override fun imageUrlParse(response: Response): String = unused()
 	}
 
-	private class LegacyFetchWithRequestHttpSource : HttpSource() {
+	internal class LegacyFetchWithRequestHttpSource : HttpSource() {
 		override val baseUrl: String = "https://example.org"
 		override val lang: String = "en"
 		override val name: String = "Legacy Fetch With Request"
